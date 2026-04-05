@@ -714,8 +714,9 @@ export default {
       )
     );
 
-    // DAILY: AI analysis at 06:00 UTC (first 15-min window: 06:00-06:14)
-    if (hour === 6 && minute < 15) {
+    // DAILY: AI analysis at 20:00 UTC = 22:00 Budapest (este 10)
+    // Analyzes today's market + recommends for tomorrow
+    if (hour === 20 && minute < 15) {
       ctx.waitUntil(
         handleDailyAnalysis(env).catch((e) =>
           console.error("[cron] Daily analysis failed:", e)

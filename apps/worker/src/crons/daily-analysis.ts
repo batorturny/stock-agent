@@ -337,6 +337,14 @@ LEARN FROM YOUR MISTAKES: If accuracy is below 50%, be MORE conservative. If a s
     createdAt: now.toISOString(),
   });
 
+  // 6a. Send daily recommendation push notification
+  const topPicks = result.buyPicks.slice(0, 3).map(p => `${p.ticker} (${(p.confidence*100).toFixed(0)}%)`).join(", ");
+  const warns = result.sellWarnings.map(w => w.ticker).join(", ");
+  const recMsg = `NAPI ELEMZÉS — Ajánlott: ${topPicks || "nincs új"}` +
+    (warns ? ` | Figyelj: ${warns}` : "") +
+    ` | Kilátás: ${result.marketOutlook.slice(0, 80)}`;
+  await sendAlert(recMsg, "info", env);
+
   // 6b. Save predictions from buy picks
   for (const pick of result.buyPicks) {
     try {
@@ -354,33 +362,55 @@ LEARN FROM YOUR MISTAKES: If accuracy is below 50%, be MORE conservative. If a s
     }
   }
 
-  // 7. Auto-execute AI portfolio actions (sells first, then buys)
-  // If drawdown halt is active, skip buys but still execute sells
+  // 7. SELL ONLY when investment plan thesis is broken
+  // The AI must explicitly flag sells — we don't sell just because there's a "better" opportunity
   const currentState = await getAccountState(env);
   const openTickers = new Set(currentState.positions.map((p) => p.ticker));
 
-  // Execute sell actions from AI first
   for (const action of result.portfolioActions) {
-    if (action.action === "sell" && openTickers.has(action.ticker)) {
-      console.log(`[daily-analysis] AI sell: ${action.ticker} — ${action.reason}`);
+    if (action.action !== "sell") continue;
+    if (!openTickers.has(action.ticker)) continue;
+
+    // Check if this position has an active investment plan
+    const plan = activePlans.find((p) => p.ticker === action.ticker);
+    if (plan) {
+      // Only sell if AI explicitly says thesis is BROKEN (not just "found something better")
+      const reasonLower = action.reason.toLowerCase();
+      const thesisBroken = reasonLower.includes("thesis broken") ||
+        reasonLower.includes("fundamentally changed") ||
+        reasonLower.includes("stop-loss") ||
+        reasonLower.includes("downgrade") ||
+        reasonLower.includes("fraud") ||
+        reasonLower.includes("bankruptcy");
+
+      if (!thesisBroken) {
+        console.log(`[daily-analysis] HOLDING ${action.ticker} — AI wanted to sell but investment plan thesis still intact. Reason: ${action.reason.slice(0, 80)}`);
+        await sendAlert(
+          HU_ALERTS.holdPeriod(action.ticker, 0) + ` Az AI eladná, de a befektetési terv még érvényes: "${plan.thesis?.slice(0, 60)}"`,
+          "info",
+          env
+        );
+        continue;
+      }
+
+      // Thesis IS broken — sell and mark plan
+      console.log(`[daily-analysis] AI sell (thesis broken): ${action.ticker} — ${action.reason}`);
       const tradeResult = await executeTrade(action, env, "ai_pick");
-      console.log(`[daily-analysis] Sell result: ${tradeResult.success ? "OK" : "FAIL"} — ${tradeResult.reason}`);
       if (tradeResult.success) {
         openTickers.delete(action.ticker);
-        // Mark corresponding investment plan as abandoned if exists
-        const plan = activePlans.find((p) => p.ticker === action.ticker);
-        if (plan) {
-          await db.update(investmentPlans)
-            .set({ status: "abandoned", updatedAt: now.toISOString() })
-            .where(eq(investmentPlans.id, plan.id));
-          console.log(`[daily-analysis] Investment plan for ${action.ticker} marked as abandoned`);
-        }
+        await db.update(investmentPlans)
+          .set({ status: "abandoned", aiConviction: `Thesis broken: ${action.reason.slice(0, 100)}`, updatedAt: now.toISOString() })
+          .where(eq(investmentPlans.id, plan.id));
       }
+    } else {
+      // No investment plan — sell if AI says so
+      console.log(`[daily-analysis] AI sell (no plan): ${action.ticker} — ${action.reason}`);
+      await executeTrade(action, env, "ai_pick");
     }
   }
 
-  // 7b. Execute buy picks — only if genuine new opportunity (dedup against yesterday)
-  // Conditions: cash > 10% AND pick is not the same as yesterday's (unless we don't hold it yet)
+  // 7b. BUY only when there's free cash AND genuine opportunity
+  // The AI recommends, but we check against existing plans before executing
   if (drawdownCheck.halted) {
     console.log("[daily-analysis] Skipping all buys — drawdown halt active");
   }
@@ -389,23 +419,28 @@ LEARN FROM YOUR MISTAKES: If accuracy is below 50%, be MORE conservative. If a s
   const hasEnoughCash = preBuyCashPct > PORTFOLIO_RULES.MAX_CASH_PCT;
 
   if (!drawdownCheck.halted && !hasEnoughCash) {
-    console.log(`[daily-analysis] Cash at ${(preBuyCashPct * 100).toFixed(1)}% — below ${PORTFOLIO_RULES.MAX_CASH_PCT * 100}% threshold, skipping new buys`);
+    console.log(`[daily-analysis] Cash at ${(preBuyCashPct * 100).toFixed(1)}% — below threshold, only sending recommendations (no auto-buy)`);
   }
 
   for (const pick of result.buyPicks) {
     if (drawdownCheck.halted) break;
-    if (!hasEnoughCash) break;
-    if (pick.confidence < PORTFOLIO_RULES.MIN_CONFIDENCE) continue;
     if (openTickers.has(pick.ticker)) continue;
 
-    // Dedup: skip if same ticker was picked yesterday and we already have enough positions
-    const isRepeatPick = yesterdayPickTickers.has(pick.ticker);
-    if (isRepeatPick && openTickers.size >= 6) {
-      console.log(`[daily-analysis] Skipping repeat pick ${pick.ticker} — same as yesterday, portfolio has ${openTickers.size} positions`);
+    // If not enough cash, just log the recommendation — don't force-buy
+    if (!hasEnoughCash) {
+      console.log(`[daily-analysis] RECOMMENDATION (no auto-buy): ${pick.ticker} ${(pick.confidence * 100).toFixed(0)}% conf — ${pick.reasoning.slice(0, 60)}`);
       continue;
     }
 
-    // Allocate ~15% of total value per position
+    if (pick.confidence < PORTFOLIO_RULES.MIN_CONFIDENCE) continue;
+
+    // Dedup against yesterday
+    const isRepeatPick = yesterdayPickTickers.has(pick.ticker);
+    if (isRepeatPick && openTickers.size >= 6) {
+      console.log(`[daily-analysis] Skipping repeat pick ${pick.ticker}`);
+      continue;
+    }
+
     const allocAmount = currentState.totalValue * 0.15;
     const currentPrice = (await getCachedPrice(pick.ticker, env))?.price;
     if (!currentPrice) continue;

@@ -18,7 +18,7 @@ const DEFAULT_WATCHLIST = [
 ];
 
 export async function handlePriceFetch(env: Env): Promise<void> {
-  // Skip market hours check — always fetch (Finnhub returns last known price when market closed)
+  // Always fetch — Finnhub returns last known price when market closed
 
   const db = drizzle(env.DB);
 
@@ -33,7 +33,9 @@ export async function handlePriceFetch(env: Env): Promise<void> {
   // Combine with watchlist, deduplicate
   const allTickers = [...new Set([...positionTickers, ...DEFAULT_WATCHLIST])];
 
-  // Fetch quotes
+  console.log(`[price-fetch] Fetching ${allTickers.length} tickers (${positionTickers.length} positions + watchlist)`);
+
+  // Fetch quotes in batches of 5 with Promise.allSettled
   const quotes = await fetchQuotes(allTickers, env);
   const now = new Date().toISOString();
 
@@ -47,11 +49,16 @@ export async function handlePriceFetch(env: Env): Promise<void> {
       open: quote.o,
       high: quote.h,
       low: quote.l,
-      volume: 0,
+      volume: quote.v ?? 0,
       recordedAt: now,
     });
   }
 
+  console.log(`[price-fetch] Stored ${quotes.size} prices, checking stops...`);
+
   // Check stop-loss and take-profit
-  await checkStopLossAndTakeProfit(env);
+  const stopActions = await checkStopLossAndTakeProfit(env);
+  if (stopActions.length > 0) {
+    console.log(`[price-fetch] Stop actions triggered: ${stopActions.join(" | ")}`);
+  }
 }

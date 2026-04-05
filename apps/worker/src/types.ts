@@ -10,7 +10,9 @@ export type Env = {
 
 export type BuyPick = {
   ticker: string;
+  currentPrice: number;
   targetPrice: number;
+  stopLoss: number;
   confidence: number;
   timeHorizon: string;
   reasoning: string;
@@ -29,9 +31,12 @@ export type PortfolioAction = {
   ticker: string;
   shares: number;
   reason: string;
+  riskRewardRatio?: number;
+  noActionReason?: string;
 };
 
 export type DailyAnalysis = {
+  reasoning: string;
   buyPicks: BuyPick[];
   sellWarnings: SellWarning[];
   portfolioActions: PortfolioAction[];
@@ -39,6 +44,14 @@ export type DailyAnalysis = {
   riskLevel: "low" | "medium" | "high";
   keyNarratives: string[];
   watchlistAdditions: string[];
+};
+
+export type SentimentResult = {
+  tickers: string[];
+  sentiment: number;
+  impact: number;
+  timeHorizon: string;
+  category: "earnings" | "macro" | "regulatory" | "M&A" | "product" | "legal" | "analyst" | "other";
 };
 
 export type PortfolioPosition = {
@@ -84,13 +97,16 @@ export type FeedSource = {
   type: "financial" | "tabloid" | "tech";
 };
 
-// Portfolio management rules
+// Portfolio management rules — AGGRESSIVE ALWAYS-INVESTED strategy
 export const PORTFOLIO_RULES = {
   INITIAL_CAPITAL: 5000.0,
   MAX_POSITIONS: 10,
-  MAX_SINGLE_POSITION_PCT: 0.2, // 20%
-  STOP_LOSS_PCT: -0.08, // -8%
-  TAKE_PROFIT_PCT: 0.15, // +15%
+  MAX_SINGLE_POSITION_PCT: 0.2, // 20% max per position
+  STOP_LOSS_PCT: -0.05, // -5% stop loss (tight)
+  TAKE_PROFIT_PCT: 0.12, // +12% take profit (sell half, trail remainder)
   MIN_CONFIDENCE: 0.7, // 70%
-  MIN_CASH_RESERVE_PCT: 0.1, // 10%
+  MIN_CASH_RESERVE_PCT: 0.05, // 5% min cash (aggressive)
+  MAX_CASH_PCT: 0.15, // 15% max cash — auto-invest above this
+  NEWS_SELL_IMPACT_THRESHOLD: 6, // impact > 6 triggers reactive sell
+  NEWS_SELL_SENTIMENT_THRESHOLD: -0.3, // sentiment < -0.3 triggers reactive sell
 } as const;

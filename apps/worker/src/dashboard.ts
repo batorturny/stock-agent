@@ -42,7 +42,8 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
 .flash-red{animation:flashRed .6s ease}
 @keyframes flashGreen{0%{color:var(--green);text-shadow:0 0 8px rgba(22,163,74,.4)}100%{text-shadow:none}}
 @keyframes flashRed{0%{color:var(--red);text-shadow:0 0 8px rgba(220,38,38,.4)}100%{text-shadow:none}}
-.table{width:100%;border-collapse:collapse;font-size:.85rem}
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.table{width:100%;border-collapse:collapse;font-size:.85rem;min-width:500px}
 .table th{text-align:left;padding:.6rem .5rem;border-bottom:2px solid var(--card-border);color:var(--gray);font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
 .table td{padding:.6rem .5rem;border-bottom:1px solid var(--table-border)}
 .table tr:last-child td{border-bottom:none}
@@ -115,18 +116,33 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
 
 /* Responsive */
 @media(max-width:768px){
-  .grid-4{grid-template-columns:repeat(2,1fr)}
-  .grid-2{grid-template-columns:1fr}
-  .grid-5{grid-template-columns:repeat(2,1fr)}
-  .trade-stats{grid-template-columns:repeat(2,1fr)}
+  .container{padding:.75rem}
+  .grid-4{grid-template-columns:1fr 1fr;gap:.75rem}
+  .grid-2{grid-template-columns:1fr;gap:.75rem}
+  .grid-5{grid-template-columns:1fr 1fr;gap:.75rem}
+  .trade-stats{grid-template-columns:1fr 1fr;gap:.75rem}
   .trade-stats .trade-stat:last-child{grid-column:span 2}
-  .header{flex-direction:column;gap:.5rem;align-items:flex-start}
+  .header{flex-direction:column;gap:.5rem;align-items:flex-start;padding:.75rem 1rem}
+  .header-right{flex-wrap:wrap;gap:.5rem;font-size:.7rem}
+  .card{padding:1rem;border-radius:10px}
+  .card-title{font-size:.65rem}
+  .stat-value{font-size:1.3rem}
   .pos-table-wrap{display:none}
-  .pos-cards{display:block}
+  .pos-cards{display:block!important}
+  .table-wrap{margin:0 -.5rem}
+  .table{min-width:400px;font-size:.75rem}
+  .table th,.table td{padding:.4rem .3rem}
+  .modal{padding:1rem;border-radius:12px;max-height:90vh}
+  .pick-card{padding:.75rem}
+  .news-list{max-height:400px}
+  .pwa-install{bottom:auto;top:.5rem;left:auto;right:.5rem;font-size:.7rem;padding:.4rem .75rem}
+  .disclaimer{font-size:.65rem;padding:.5rem .75rem}
+  .footer{font-size:.6rem;padding:1rem}
 }
-@media(max-width:480px){
-  .grid-4{grid-template-columns:1fr 1fr}
-  .trade-stats{grid-template-columns:1fr 1fr}
+@media(max-width:380px){
+  .grid-4{grid-template-columns:1fr}
+  .stat-value{font-size:1.1rem}
+  .header h1{font-size:1rem}
 }
 
 /* Modal */
@@ -550,9 +566,9 @@ async function refresh(){
   if(tradeData && tradeData.trades.length > 0){
     renderTradeStats(tradeData.trades);
 
-    $('trades-section').innerHTML = '<table class="table"><thead><tr><th>Dátum</th><th>Típus</th><th>Ticker</th><th class="text-right">Db</th><th class="text-right">Ár</th><th class="text-right">Összeg</th><th>Indok</th></tr></thead><tbody>' + tradeData.trades.map(t =>
-      '<tr style="cursor:pointer" onclick="showTradeDetail('+t.id+')"><td>'+fmtDate(t.executedAt)+'</td><td><span class="badge '+(t.action==='buy'?'badge-buy':'badge-sell')+'">'+t.action.toUpperCase()+'</span></td><td class="mono">'+t.ticker+'</td><td class="text-right">'+t.shares+'</td><td class="text-right">'+fmt(t.price)+'</td><td class="text-right" style="font-weight:600">'+fmt(t.total)+'</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gray);font-size:.8rem">'+(t.reason||'—')+'</td></tr>'
-    ).join('') + '</tbody></table>';
+    $('trades-section').innerHTML = '<div class="table-wrap"><table class="table"><thead><tr><th>Típus</th><th>Ticker</th><th class="text-right">Db</th><th class="text-right">Ár</th><th class="text-right">Összeg</th><th>Indok</th></tr></thead><tbody>' + tradeData.trades.map(t =>
+      '<tr style="cursor:pointer" onclick="showTradeDetail('+t.id+')"><td><span class="badge '+(t.action==='buy'?'badge-buy':'badge-sell')+'">'+t.action.toUpperCase()+'</span></td><td class="mono">'+t.ticker+'</td><td class="text-right">'+t.shares+'</td><td class="text-right">'+fmt(t.price)+'</td><td class="text-right" style="font-weight:600">'+fmt(t.total)+'</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gray);font-size:.8rem">'+(t.reason||'—')+'</td></tr>'
+    ).join('') + '</tbody></table></div>';
 
     // Build chart data from portfolio snapshots (cumulative approach)
     buildChartFromTrades(tradeData.trades, p);

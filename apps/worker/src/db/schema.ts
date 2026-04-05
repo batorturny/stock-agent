@@ -25,6 +25,10 @@ export const trades = sqliteTable("trades", {
   total: real("total").notNull(),
   reason: text("reason"),
   confidence: real("confidence"),
+  triggerType: text("trigger_type"), // 'ai_pick' | 'stop_loss' | 'take_profit' | 'news_reactive' | 'force_invest' | 'rebalance'
+  analysisId: integer("analysis_id"),
+  preCash: real("pre_cash"),
+  postCash: real("post_cash"),
   executedAt: text("executed_at").notNull(),
 });
 
@@ -69,5 +73,64 @@ export const account = sqliteTable("account", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   cash: real("cash").notNull().default(5000.0),
   totalValue: real("total_value").notNull().default(5000.0),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const sectors = sqliteTable("sectors", {
+  ticker: text("ticker").primaryKey(),
+  sector: text("sector").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const dailySnapshots = sqliteTable("daily_snapshots", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  date: text("date").notNull().unique(),
+  totalValue: real("total_value").notNull(),
+  cash: real("cash").notNull(),
+  invested: real("invested").notNull(),
+  positionsCount: integer("positions_count").notNull(),
+  spyPrice: real("spy_price"),
+  dailyReturnPct: real("daily_return_pct"),
+  spyReturnPct: real("spy_return_pct"),
+  peakValue: real("peak_value").notNull(),
+  drawdownPct: real("drawdown_pct").notNull().default(0),
+  sharpe30d: real("sharpe_30d"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const predictions = sqliteTable("predictions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  ticker: text("ticker").notNull(),
+  entryPrice: real("entry_price").notNull(),
+  targetPrice: real("target_price").notNull(),
+  stopLoss: real("stop_loss").notNull(),
+  confidence: real("confidence").notNull(),
+  predictedAt: text("predicted_at").notNull(),
+  outcome: text("outcome"), // 'target_hit' | 'stop_hit' | 'expired' | 'pending'
+  actualPrice: real("actual_price"),
+  resolvedAt: text("resolved_at"),
+  pnlPct: real("pnl_pct"),
+});
+
+export const pendingOrders = sqliteTable("pending_orders", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  ticker: text("ticker").notNull(),
+  action: text("action", { enum: ["buy", "sell"] }).notNull(),
+  limitPrice: real("limit_price").notNull(),
+  shares: integer("shares").notNull(),
+  reason: text("reason"),
+  expiresAt: text("expires_at").notNull(),
+  status: text("status", { enum: ["pending", "filled", "expired", "cancelled"] }).default("pending"),
+  createdAt: text("created_at").notNull(),
+  filledAt: text("filled_at"),
+});
+
+export const earningsCalendar = sqliteTable("earnings_calendar", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  ticker: text("ticker").notNull(),
+  reportDate: text("report_date").notNull(),
+  estimateEps: real("estimate_eps"),
+  actualEps: real("actual_eps"),
+  status: text("status", { enum: ["upcoming", "reported"] }).default("upcoming"),
   updatedAt: text("updated_at").notNull(),
 });

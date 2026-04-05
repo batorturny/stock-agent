@@ -1,9 +1,19 @@
 import { desc, gte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { news, prices, analysis } from "../db/schema";
+import { news, prices, analysis, predictions } from "../db/schema";
 import { runDailyAnalysis } from "../services/ai-analyst";
 import { getAccountState, executeTrade, rebalancePortfolio } from "../services/portfolio";
 import { getCachedPrice } from "../services/price-api";
+import {
+  checkDrawdownHalt,
+  fetchAndSaveEarningsCalendar,
+  getUpcomingEarnings,
+  getHistoricalPrices,
+  computeRSI,
+  computeSMA,
+  computeMACD,
+} from "../services/risk-manager";
+import { sendAlert } from "../services/alerter";
 import type { Env } from "../types";
 import { PORTFOLIO_RULES } from "../types";
 
@@ -81,13 +91,65 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
     .map((p) => `${p.ticker}: $${p.price} @ ${p.recordedAt}`)
     .join("\n");
 
-  // 5. Run AI analysis
+  // 4b. Compute technical indicators for portfolio + watchlist tickers
+  const portfolioTickers = accountState.positions.map((p) => p.ticker);
+  const watchlistTickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "JPM", "AMD", "NFLX"];
+  const allTickersForTA = [...new Set([...portfolioTickers, ...watchlistTickers])];
+
+  const technicalData: string[] = [];
+  for (const ticker of allTickersForTA) {
+    const historicalPrices = await getHistoricalPrices(ticker, 60, env);
+    if (historicalPrices.length < 15) continue;
+
+    const rsi = computeRSI(historicalPrices);
+    const sma20 = computeSMA(historicalPrices, 20);
+    const sma50 = computeSMA(historicalPrices, 50);
+    const macd = computeMACD(historicalPrices);
+    const latestPrice = historicalPrices[historicalPrices.length - 1];
+
+    let line = `${ticker}: price=$${latestPrice.toFixed(2)}`;
+    if (rsi !== null) line += ` RSI=${rsi.toFixed(1)}`;
+    if (sma20 !== null) line += ` SMA20=$${sma20.toFixed(2)}`;
+    if (sma50 !== null) line += ` SMA50=$${sma50.toFixed(2)}`;
+    if (macd) line += ` MACD=${macd.macd} signal=${macd.signal} hist=${macd.histogram}`;
+    if (sma20 !== null && latestPrice > sma20) line += " [ABOVE SMA20]";
+    if (sma20 !== null && latestPrice < sma20) line += " [BELOW SMA20]";
+    if (rsi !== null && rsi > 70) line += " [OVERBOUGHT]";
+    if (rsi !== null && rsi < 30) line += " [OVERSOLD]";
+
+    technicalData.push(line);
+  }
+
+  const technicalIndicators = technicalData.length > 0
+    ? "\n\n### Technical Indicators\n" + technicalData.join("\n")
+    : "";
+
+  // 4c. Fetch earnings calendar from Finnhub
+  console.log("[daily-analysis] Fetching earnings calendar...");
+  await fetchAndSaveEarningsCalendar(env);
+
+  // 4d. Get upcoming earnings for portfolio tickers
+  const upcomingEarnings = await getUpcomingEarnings(portfolioTickers, env);
+  const earningsWarning = upcomingEarnings.length > 0
+    ? "\n\n### EARNINGS WARNINGS\n" +
+      upcomingEarnings.map((e) => `${e.ticker}: earnings on ${e.date} — DO NOT BUY within 3 days of earnings`).join("\n")
+    : "";
+
+  // 4e. Check drawdown halt before proceeding
+  const drawdownCheck = await checkDrawdownHalt(env);
+  if (drawdownCheck.halted) {
+    console.log(`[daily-analysis] DRAWDOWN HALT: portfolio down ${drawdownCheck.drawdownPct}% — skipping AI buy execution`);
+    await sendAlert(`DRAWDOWN HALT: portfolio down ${drawdownCheck.drawdownPct}% from peak — all buying paused`, "critical", env);
+  }
+
+  // 5. Run AI analysis with enriched data
   console.log("[daily-analysis] Running AI analysis...");
+  const enrichedPriceHistory = (priceHistory || "No price history available") + technicalIndicators + earningsWarning;
   const result = await runDailyAnalysis(
     portfolioState,
     recentNews || "No recent news available",
     newsTrends || "No trend data available",
-    priceHistory || "No price history available",
+    enrichedPriceHistory,
     env
   );
 
@@ -105,7 +167,25 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
     createdAt: now.toISOString(),
   });
 
+  // 6b. Save predictions from buy picks
+  for (const pick of result.buyPicks) {
+    try {
+      await db.insert(predictions).values({
+        ticker: pick.ticker,
+        entryPrice: pick.currentPrice,
+        targetPrice: pick.targetPrice,
+        stopLoss: pick.stopLoss,
+        confidence: pick.confidence,
+        predictedAt: now.toISOString(),
+        outcome: "pending",
+      });
+    } catch {
+      // Ignore duplicate or insert errors
+    }
+  }
+
   // 7. Auto-execute AI portfolio actions (sells first, then buys)
+  // If drawdown halt is active, skip buys but still execute sells
   const currentState = await getAccountState(env);
   const openTickers = new Set(currentState.positions.map((p) => p.ticker));
 

@@ -13,10 +13,13 @@ async function callGemini(
   maxTokens = 4096
 ): Promise<string> {
   const response = await fetch(
-    `${GEMINI_BASE}/${MODEL}:generateContent?key=${env.GEMINI_API_KEY}`,
+    `${GEMINI_BASE}/${MODEL}:generateContent`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": env.GEMINI_API_KEY,
+      },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {

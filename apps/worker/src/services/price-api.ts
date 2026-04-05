@@ -20,7 +20,8 @@ export async function fetchQuote(
 ): Promise<FinnhubQuote | null> {
   try {
     const res = await fetch(
-      `${FINNHUB_BASE}/quote?symbol=${ticker}&token=${env.FINNHUB_API_KEY}`
+      `${FINNHUB_BASE}/quote?symbol=${ticker}`,
+      { headers: { "X-Finnhub-Token": env.FINNHUB_API_KEY } }
     );
     if (!res.ok) return null;
     const data = (await res.json()) as FinnhubQuote;
@@ -42,7 +43,8 @@ async function fetchVolume(ticker: string, env: Env): Promise<number> {
     const now = Math.floor(Date.now() / 1000);
     const dayAgo = now - 86400;
     const res = await fetch(
-      `${FINNHUB_BASE}/stock/candle?symbol=${ticker}&resolution=D&from=${dayAgo}&to=${now}&token=${env.FINNHUB_API_KEY}`
+      `${FINNHUB_BASE}/stock/candle?symbol=${ticker}&resolution=D&from=${dayAgo}&to=${now}`,
+      { headers: { "X-Finnhub-Token": env.FINNHUB_API_KEY } }
     );
     if (!res.ok) return 0;
     const data = (await res.json()) as { v?: number[]; s: string };

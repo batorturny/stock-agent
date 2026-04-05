@@ -6,6 +6,7 @@ export type Env = {
   ENVIRONMENT: string;
   API_SECRET?: string;
   DASHBOARD_ORIGIN?: string;
+  ALERT_WEBHOOK?: string;
 };
 
 export type BuyPick = {
@@ -102,6 +103,7 @@ export const PORTFOLIO_RULES = {
   INITIAL_CAPITAL: 5000.0,
   MAX_POSITIONS: 10,
   MAX_SINGLE_POSITION_PCT: 0.2, // 20% max per position
+  MAX_SECTOR_PCT: 0.4, // 40% max per sector
   STOP_LOSS_PCT: -0.05, // -5% stop loss (tight)
   TAKE_PROFIT_PCT: 0.12, // +12% take profit (sell half, trail remainder)
   MIN_CONFIDENCE: 0.7, // 70%
@@ -109,4 +111,7 @@ export const PORTFOLIO_RULES = {
   MAX_CASH_PCT: 0.15, // 15% max cash — auto-invest above this
   NEWS_SELL_IMPACT_THRESHOLD: 6, // impact > 6 triggers reactive sell
   NEWS_SELL_SENTIMENT_THRESHOLD: -0.3, // sentiment < -0.3 triggers reactive sell
+  CIRCUIT_BREAKER_PCT: 0.15, // 15% single-day drop triggers circuit breaker
+  MAX_DRAWDOWN_HALT_PCT: 0.15, // 15% drawdown from peak halts new buys
+  SLIPPAGE_PCT: 0.0005, // 0.05% slippage simulation
 } as const;

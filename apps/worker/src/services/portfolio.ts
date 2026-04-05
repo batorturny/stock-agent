@@ -4,6 +4,27 @@ import { portfolio, trades, account } from "../db/schema";
 import type { Env, PortfolioAction, AccountState, PortfolioPosition } from "../types";
 import { PORTFOLIO_RULES } from "../types";
 import { getCachedPrice, fetchQuote, updatePriceCache } from "./price-api";
+import {
+  addSlippage,
+  checkSectorLimit,
+  checkCircuitBreaker,
+  checkDrawdownHalt,
+  checkEarningsProximity,
+} from "./risk-manager";
+import { sendAlert } from "./alerter";
+
+// ─── Trade lock (KV-based mutex) ───
+
+async function acquireTradeLock(env: Env): Promise<boolean> {
+  const existing = await env.CACHE.get("trade_lock");
+  if (existing) return false;
+  await env.CACHE.put("trade_lock", "1", { expirationTtl: 30 });
+  return true;
+}
+
+async function releaseTradeLock(env: Env): Promise<void> {
+  await env.CACHE.delete("trade_lock");
+}
 
 function getDb(env: Env) {
   return drizzle(env.DB);
@@ -118,7 +139,26 @@ export async function getAccountState(env: Env): Promise<AccountState> {
 
 export async function executeTrade(
   action: PortfolioAction,
-  env: Env
+  env: Env,
+  triggerType: string = "ai_pick"
+): Promise<{ success: boolean; reason: string }> {
+  // Acquire trade lock to prevent concurrent execution
+  const lockAcquired = await acquireTradeLock(env);
+  if (!lockAcquired) {
+    return { success: false, reason: "Trade lock held — another trade in progress" };
+  }
+
+  try {
+    return await executeTradeInner(action, env, triggerType);
+  } finally {
+    await releaseTradeLock(env);
+  }
+}
+
+async function executeTradeInner(
+  action: PortfolioAction,
+  env: Env,
+  triggerType: string
 ): Promise<{ success: boolean; reason: string }> {
   const db = getDb(env);
   const [acct] = await db.select().from(account).limit(1);
@@ -126,23 +166,50 @@ export async function executeTrade(
 
   let cached = await getCachedPrice(action.ticker, env);
   if (!cached) {
-    // Cache miss — fetch fresh price from Finnhub
     const quote = await fetchQuote(action.ticker, env);
     if (!quote) return { success: false, reason: `No price data for ${action.ticker}` };
     await updatePriceCache(action.ticker, quote, env);
     cached = { price: quote.c, change: quote.d, changePercent: quote.dp, updatedAt: new Date().toISOString() };
   }
 
-  const price = cached.price;
+  // Apply slippage to price
+  const rawPrice = cached.price;
+  const price = addSlippage(rawPrice, action.action === "buy" ? "buy" : "sell");
   const total = price * action.shares;
   const now = new Date().toISOString();
+  const preCash = acct.cash;
 
   if (action.action === "buy") {
+    // ── Risk checks before any buy ──
+    const drawdownCheck = await checkDrawdownHalt(env);
+    if (drawdownCheck.halted) {
+      await sendAlert(`BUY blocked for ${action.ticker}: drawdown halt at ${drawdownCheck.drawdownPct}%`, "warning", env);
+      return { success: false, reason: `Drawdown halt: portfolio down ${drawdownCheck.drawdownPct}%` };
+    }
+
+    const circuitCheck = await checkCircuitBreaker(action.ticker, rawPrice, env);
+    if (circuitCheck.triggered) {
+      await sendAlert(`BUY blocked for ${action.ticker}: ${circuitCheck.reason}`, "warning", env);
+      return { success: false, reason: circuitCheck.reason };
+    }
+
+    const earningsCheck = await checkEarningsProximity(action.ticker, env);
+    if (earningsCheck.nearEarnings) {
+      await sendAlert(`BUY blocked for ${action.ticker}: earnings in ${earningsCheck.daysUntil} day(s)`, "info", env);
+      return { success: false, reason: `Earnings in ${earningsCheck.daysUntil} day(s) — buying blocked` };
+    }
+
+    const state = await getAccountState(env);
+    const sectorCheck = checkSectorLimit(action.ticker, state.positions, state.totalValue, total);
+    if (!sectorCheck.allowed) {
+      return { success: false, reason: sectorCheck.reason };
+    }
+
+    // ── Standard position checks ──
     if (total > acct.cash) {
       return { success: false, reason: "Insufficient cash" };
     }
 
-    // Aggressive: only enforce 5% min cash reserve
     const minCash = acct.totalValue * PORTFOLIO_RULES.MIN_CASH_RESERVE_PCT;
     if (acct.cash - total < minCash) {
       return { success: false, reason: `Would violate ${PORTFOLIO_RULES.MIN_CASH_RESERVE_PCT * 100}% cash reserve rule` };
@@ -199,7 +266,7 @@ export async function executeTrade(
       .set({ cash: newCash, updatedAt: now })
       .where(eq(account.id, acct.id));
 
-    // Record trade
+    // Record trade with triggerType, preCash, postCash
     await db.insert(trades).values({
       ticker: action.ticker,
       action: "buy",
@@ -207,15 +274,18 @@ export async function executeTrade(
       price,
       total,
       reason: action.reason,
+      triggerType,
+      preCash,
+      postCash: newCash,
       executedAt: now,
     });
 
-    console.log(`[portfolio] BUY ${action.shares} ${action.ticker} @ $${price} | cash: $${newCash.toFixed(2)}`);
+    console.log(`[portfolio] BUY ${action.shares} ${action.ticker} @ $${price.toFixed(2)} (slippage from $${rawPrice.toFixed(2)}) | cash: $${newCash.toFixed(2)} | trigger: ${triggerType}`);
 
-    // After buy: check if we should auto-invest remaining cash
+    // After buy: auto-invest remaining cash if needed
     await autoInvestExcessCash(env);
 
-    return { success: true, reason: `Bought ${action.shares} ${action.ticker} @ $${price}` };
+    return { success: true, reason: `Bought ${action.shares} ${action.ticker} @ $${price.toFixed(2)}` };
   }
 
   if (action.action === "sell") {
@@ -264,7 +334,7 @@ export async function executeTrade(
       .set({ cash: newCash, updatedAt: now })
       .where(eq(account.id, acct.id));
 
-    // Record trade
+    // Record trade with triggerType, preCash, postCash
     await db.insert(trades).values({
       ticker: action.ticker,
       action: "sell",
@@ -272,21 +342,24 @@ export async function executeTrade(
       price,
       total: sellTotal,
       reason: action.reason,
+      triggerType,
+      preCash,
+      postCash: newCash,
       executedAt: now,
     });
 
-    console.log(`[portfolio] SELL ${sellShares} ${action.ticker} @ $${price} | cash: $${newCash.toFixed(2)}`);
+    console.log(`[portfolio] SELL ${sellShares} ${action.ticker} @ $${price.toFixed(2)} (slippage from $${rawPrice.toFixed(2)}) | cash: $${newCash.toFixed(2)} | trigger: ${triggerType}`);
 
-    // After sell: check if we should auto-invest the freed cash
+    // After sell: auto-invest the freed cash
     await autoInvestExcessCash(env);
 
-    return { success: true, reason: `Sold ${sellShares} ${action.ticker} @ $${price}` };
+    return { success: true, reason: `Sold ${sellShares} ${action.ticker} @ $${price.toFixed(2)}` };
   }
 
   return { success: true, reason: "Hold — no action taken" };
 }
 
-// ─── Stop Loss & Take Profit ───
+// ─── Stop Loss & Take Profit (INDEPENDENT — works even if AI is down) ───
 
 export async function checkStopLossAndTakeProfit(env: Env): Promise<string[]> {
   const db = getDb(env);
@@ -304,6 +377,28 @@ export async function checkStopLossAndTakeProfit(env: Env): Promise<string[]> {
     const pnlPercent = (cached.price - pos.avgPrice) / pos.avgPrice;
     const tpTriggered = await isTakeProfitTriggered(pos.ticker, env);
 
+    // ── Circuit breaker: single-stock crash — sell immediately ──
+    const circuitCheck = await checkCircuitBreaker(pos.ticker, cached.price, env);
+    if (circuitCheck.triggered) {
+      console.log(`[portfolio] CIRCUIT BREAKER: ${pos.ticker} — ${circuitCheck.reason}`);
+      const result = await executeTrade(
+        {
+          action: "sell",
+          ticker: pos.ticker,
+          shares: pos.shares,
+          reason: circuitCheck.reason,
+        },
+        env,
+        "circuit_breaker"
+      );
+      if (result.success) {
+        await db.update(portfolio).set({ closeReason: "stop_loss" }).where(eq(portfolio.id, pos.id));
+        actions.push(`CIRCUIT-BREAKER: ${pos.ticker} sold — ${circuitCheck.reason}`);
+        await sendAlert(`CIRCUIT BREAKER SELL: ${pos.ticker} @ $${cached.price.toFixed(2)} — ${circuitCheck.reason}`, "critical", env);
+      }
+      continue;
+    }
+
     // ── Trailing stop after take-profit ──
     if (tpTriggered) {
       const trailingStop = await getTrailingStop(pos.ticker, env);
@@ -315,14 +410,13 @@ export async function checkStopLossAndTakeProfit(env: Env): Promise<string[]> {
             shares: pos.shares,
             reason: `Trailing stop hit at $${cached.price.toFixed(2)} (stop: $${trailingStop.toFixed(2)})`,
           },
-          env
+          env,
+          "trailing_stop"
         );
         if (result.success) {
-          await db
-            .update(portfolio)
-            .set({ closeReason: "stop_loss" })
-            .where(eq(portfolio.id, pos.id));
+          await db.update(portfolio).set({ closeReason: "stop_loss" }).where(eq(portfolio.id, pos.id));
           actions.push(`TRAILING-STOP: ${pos.ticker} sold at $${cached.price.toFixed(2)}`);
+          await sendAlert(`TRAILING STOP: ${pos.ticker} sold at $${cached.price.toFixed(2)} (stop: $${trailingStop.toFixed(2)})`, "warning", env);
         }
         continue;
       }
@@ -337,14 +431,13 @@ export async function checkStopLossAndTakeProfit(env: Env): Promise<string[]> {
           shares: pos.shares,
           reason: `Stop-loss triggered at ${(pnlPercent * 100).toFixed(1)}%`,
         },
-        env
+        env,
+        "stop_loss"
       );
       if (result.success) {
-        await db
-          .update(portfolio)
-          .set({ closeReason: "stop_loss" })
-          .where(eq(portfolio.id, pos.id));
+        await db.update(portfolio).set({ closeReason: "stop_loss" }).where(eq(portfolio.id, pos.id));
         actions.push(`STOP-LOSS: ${pos.ticker} at ${(pnlPercent * 100).toFixed(1)}%`);
+        await sendAlert(`STOP-LOSS: ${pos.ticker} sold at ${(pnlPercent * 100).toFixed(1)}% loss`, "warning", env);
       }
       continue;
     }
@@ -360,12 +453,13 @@ export async function checkStopLossAndTakeProfit(env: Env): Promise<string[]> {
             shares: halfShares,
             reason: `Take-profit: sold 50% at ${(pnlPercent * 100).toFixed(1)}%, trailing stop set at break-even`,
           },
-          env
+          env,
+          "take_profit"
         );
         if (result.success) {
-          // Mark take-profit triggered, set trailing stop at break-even (avgPrice)
           await setTakeProfitTriggered(pos.ticker, pos.avgPrice, env);
           actions.push(`TAKE-PROFIT: ${pos.ticker} half sold at ${(pnlPercent * 100).toFixed(1)}%, trailing at $${pos.avgPrice.toFixed(2)}`);
+          await sendAlert(`TAKE-PROFIT: ${pos.ticker} +${(pnlPercent * 100).toFixed(1)}% — sold 50%, trailing at $${pos.avgPrice.toFixed(2)}`, "info", env);
         }
       }
     }
@@ -413,14 +507,16 @@ export async function newsReactiveSell(
       shares: position.shares,
       reason: `News reactive sell: impact=${impact}, sentiment=${sentiment.toFixed(2)}`,
     },
-    env
+    env,
+    "news_reactive"
   );
 
   if (result.success) {
     await db
       .update(portfolio)
-      .set({ closeReason: "stop_loss" }) // closest enum value
+      .set({ closeReason: "stop_loss" })
       .where(eq(portfolio.id, position.id));
+    await sendAlert(`NEWS REACTIVE SELL: ${ticker} — impact=${impact}, sentiment=${sentiment.toFixed(2)}`, "critical", env);
     return { sold: true, reason: result.reason };
   }
 
@@ -452,7 +548,8 @@ export async function rebalancePortfolio(env: Env): Promise<string[]> {
             shares: sharesToSell,
             reason: `Rebalance: position at ${(posPct * 100).toFixed(1)}%, trimming to ~18%`,
           },
-          env
+          env,
+          "rebalance"
         );
         if (result.success) {
           actions.push(`REBALANCE-TRIM: ${pos.ticker} sold ${sharesToSell} shares (was ${(posPct * 100).toFixed(1)}%)`);
@@ -522,7 +619,8 @@ async function autoInvestExcessCash(env: Env): Promise<void> {
         shares,
         reason: `Auto-invest: deploying excess cash (${(currentCashPct * 100).toFixed(1)}% > ${PORTFOLIO_RULES.MAX_CASH_PCT * 100}% max)`,
       },
-      env
+      env,
+      "auto_invest"
     );
   }
 }

@@ -1,0 +1,26 @@
+name = "stock-agent"
+main = "src/index.ts"
+compatibility_date = "2025-03-01"
+compatibility_flags = ["nodejs_compat"]
+account_id = "466788bf94b994a7922cbd15b834fe9b"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "stock-agent-db"
+database_id = "ec67bd1d-5a79-49ed-990b-315a59215669"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "425ce93f0ab84e708013a64198298069"
+
+# Cron triggers disabled — free plan limit reached on this account
+# Enable when upgrading to Workers Paid plan or freeing up cron slots
+# [triggers]
+# crons = [
+#   "*/15 * * * *",
+#   "0 6 * * *",
+#   "0 7 * * 1",
+# ]
+
+[vars]
+ENVIRONMENT = "development"

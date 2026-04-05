@@ -13,6 +13,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{overflow-x:hidden;width:100%;max-width:100vw}
+.icon{display:inline-block;width:1em;height:1em;vertical-align:-.125em;fill:currentColor}
+.icon-sm{width:.85em;height:.85em}
+.icon-lg{width:1.25em;height:1.25em}
 :root{--blue:#3b82f6;--blue-light:#60a5fa;--blue-dark:#1d4ed8;--blue-bg:#eff6ff;--blue-50:#dbeafe;--green:#16a34a;--red:#dc2626;--gray:#64748b;--gray-light:#f1f5f9;--white:#ffffff;--dark:#0f172a;--card-bg:var(--white);--card-border:#e2e8f0;--card-shadow:rgba(0,0,0,.04);--body-bg:var(--blue-bg);--table-border:#f1f5f9;--header-bg:var(--white);--footer-bg:var(--white);--disclaimer-bg:#fef3c7;--disclaimer-border:#fde68a;--disclaimer-color:#92400e;--modal-bg:var(--white);--modal-shadow:rgba(0,0,0,.2);--warn-bg:#fef2f2;--warn-border:#fecaca;--hover-bg:#f8fafc}
 body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--body-bg);color:var(--dark);min-height:100vh;transition:background .3s,color .3s}
 .header{background:var(--header-bg);border-bottom:2px solid var(--blue);padding:1rem 1.5rem;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10;transition:background .3s}
@@ -253,7 +256,7 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
 
 <div class="header">
   <div class="logo">
-    <div class="logo-icon">📈</div>
+    <div class="logo-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg></div>
     <div>
       <h1>Stock Agent</h1>
     </div>
@@ -262,7 +265,7 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
   <div class="header-right">
     <span id="status-text"><span class="status-dot status-ok"></span> NYSE Watchlist</span>
     <span class="last-refresh" id="last-refresh"></span>
-    <button class="btn btn-blue" id="btn-refresh" onclick="triggerAll()">🔄 Frissítés</button>
+    <button class="btn btn-blue" id="btn-refresh" onclick="triggerAll()"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Frissítés</button>
     <select class="risk-select" id="risk-select" onchange="changeRiskProfile(this.value)" title="Kockázati profil">
       <option value="conservative">Konzervatív</option>
       <option value="balanced" selected>Kiegyensúlyozott</option>
@@ -274,13 +277,13 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
 
 <div class="container">
   <div class="disclaimer">
-    ⚠️ Ez egy szimulációs rendszer — kizárólag oktatási célokat szolgál. NEM pénzügyi tanácsadás. Virtuális portfólió, valós pénz nincs benne.
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0zM12 9v4m0 4h.01"/></svg> Ez egy szimulációs rendszer — kizárólag oktatási célokat szolgál. NEM pénzügyi tanácsadás. Virtuális portfólió, valós pénz nincs benne.
   </div>
 
   <!-- Alerts Panel -->
   <div class="card" id="alerts-panel" style="margin-bottom:1.25rem;display:none">
     <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleAlerts()">
-      <span>🔔 Értesítések</span>
+      <span><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg> Értesítések</span>
       <span id="alerts-toggle" style="font-size:.75rem;color:var(--blue)">▼ Mind</span>
     </div>
     <div id="alerts-list"></div>
@@ -288,7 +291,7 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
 
   <!-- Portfolio Value Chart -->
   <div class="chart-card" id="chart-section" style="display:none">
-    <div class="card-title">📈 Portfólió Érték Alakulása</div>
+    <div class="card-title"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg> Portfólió Érték Alakulása</div>
     <div id="chart-container"></div>
   </div>
 
@@ -302,7 +305,7 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
 
   <!-- Performance vs SPY Chart -->
   <div class="chart-card" id="perf-chart-section" style="display:none">
-    <div class="card-title">📊 Teljesítmény vs. S&P 500</div>
+    <div class="card-title"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg> Teljesítmény vs. S&P 500</div>
     <div id="perf-chart-container"></div>
     <div class="perf-legend">
       <div class="perf-legend-item"><div class="perf-legend-dot" style="background:var(--blue)"></div> Portfólió</div>
@@ -313,19 +316,19 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
 
   <!-- Macro Indicators -->
   <div id="macro-section" style="display:none;margin-bottom:1.25rem">
-    <div class="card-title" style="margin-bottom:.75rem">🌍 Makro Indikátorok</div>
+    <div class="card-title" style="margin-bottom:.75rem"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg> Makro Indikátorok</div>
     <div class="macro-grid" id="macro-grid"></div>
   </div>
 
   <!-- Earnings Calendar -->
   <div class="card" id="earnings-section" style="margin-bottom:1.25rem;display:none">
-    <div class="card-title">📅 Earnings Naptár</div>
+    <div class="card-title"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> Earnings Naptár</div>
     <div id="earnings-list"></div>
   </div>
 
   <!-- Sector Allocation -->
   <div class="card" id="sector-section" style="margin-bottom:1.25rem;display:none">
-    <div class="card-title">🥧 Szektor Allokáció</div>
+    <div class="card-title"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.21 15.89A10 10 0 118 2.83"/><path d="M22 12A10 10 0 0012 2v10z"/></svg> Szektor Allokáció</div>
     <div id="sector-chart-container" style="display:flex;align-items:flex-start;gap:1rem;flex-wrap:wrap"></div>
   </div>
 
@@ -345,14 +348,14 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
   <div class="grid grid-2" style="margin-bottom:1.25rem">
     <!-- AI Picks -->
     <div class="card">
-      <div class="card-title">🤖 AI Ajánlások</div>
+      <div class="card-title"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="9" cy="16" r="1"/><circle cx="15" cy="16" r="1"/><path d="M12 2v4m-5 5V9a5 5 0 0110 0v2"/></svg> AI Ajánlások</div>
       <div id="outlook-box" class="outlook-box" style="display:none"></div>
       <div id="picks-list"></div>
       <div id="warns-list" style="margin-top:1rem"></div>
     </div>
     <!-- News -->
     <div class="card">
-      <div class="card-title">📰 Hírek</div>
+      <div class="card-title"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h16a2 2 0 002-2V4a2 2 0 00-2-2H8a2 2 0 00-2 2v16a2 2 0 01-2 2zm0 0a2 2 0 01-2-2v-9c0-1.1.9-2 2-2h2m2-4h6m-6 4h6m-6 4h4"/></svg> Hírek</div>
       <div id="news-filter-bar" class="news-filter-bar" style="display:none"></div>
       <div id="news-list" class="news-list"></div>
     </div>
@@ -360,7 +363,7 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
 
   <!-- Trade History -->
   <div class="card">
-    <div class="card-title">📊 Trade Történet</div>
+    <div class="card-title"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg> Trade Történet</div>
     <div id="trade-stats"></div>
     <div id="trades-section"></div>
   </div>
@@ -376,7 +379,7 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
 </div>
 
 <!-- PWA Install Button -->
-<button class="pwa-install" id="pwa-install" onclick="installPwa()">📲 Telepítés</button>
+<button class="pwa-install" id="pwa-install" onclick="installPwa()"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg> Telepítés</button>
 
 <!-- Trade Notification Banner -->
 <div class="notif-banner" id="notif-banner" onclick="openLastTrade()"></div>
@@ -392,6 +395,21 @@ const pct = n => (n>=0?'+':'') + n.toFixed(2) + '%';
 const cls = n => n >= 0 ? 'positive' : 'negative';
 const badgeCls = n => n >= 0 ? 'badge-pos' : 'badge-neg';
 const fmtDate = s => { try{return new Date(s).toLocaleDateString('hu-HU',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}catch(e){return s} };
+
+// Company name mapping for display
+const COMPANY_NAMES = {
+  AAPL:'Apple',MSFT:'Microsoft',GOOGL:'Alphabet',AMZN:'Amazon',NVDA:'Nvidia',META:'Meta',TSLA:'Tesla',
+  AMD:'AMD',CRM:'Salesforce',INTC:'Intel',AVGO:'Broadcom',ORCL:'Oracle',ADBE:'Adobe',NOW:'ServiceNow',
+  JPM:'JPMorgan',BAC:'Bank of America',WFC:'Wells Fargo',GS:'Goldman Sachs',MS:'Morgan Stanley',
+  V:'Visa',MA:'Mastercard',AXP:'American Express',BLK:'BlackRock',C:'Citigroup',
+  JNJ:'Johnson & Johnson',UNH:'UnitedHealth',LLY:'Eli Lilly',PFE:'Pfizer',ABBV:'AbbVie',MRK:'Merck',
+  WMT:'Walmart',PG:'Procter & Gamble',COST:'Costco',HD:'Home Depot',NKE:'Nike',MCD:'McDonalds',
+  KO:'Coca-Cola',PEP:'PepsiCo',DIS:'Disney',NFLX:'Netflix',
+  XOM:'ExxonMobil',CVX:'Chevron',CAT:'Caterpillar',BA:'Boeing',
+  PLD:'Prologis',AMT:'American Tower',CCI:'Crown Castle',SPG:'Simon Property',
+  NEE:'NextEra Energy',DUK:'Duke Energy',SPY:'S&P 500 ETF',QQQ:'Nasdaq 100 ETF',
+};
+function companyName(ticker) { return COMPANY_NAMES[ticker] || ''; }
 
 // Track previous values for flash animation
 const prevValues = {};
@@ -693,7 +711,7 @@ function renderEarnings(data) {
   }
   $('earnings-section').style.display = 'block';
 
-  const header = '<div class="earnings-row" style="font-weight:600;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--gray)"><span style="min-width:60px">Ticker</span><span style="flex:1">Dátum</span><span style="min-width:50px;text-align:center">Napok</span><span style="min-width:80px;text-align:right">EPS Becslés</span></div>';
+  const header = '<div class="earnings-row" style="font-weight:600;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--gray)"><span style="min-width:60px">Ticker</span><span style="flex:1">Dátum</span><span style="min-width:50px;text-align:center">Napok</span><span style="min-width:80px;text-align:right">Nyereség/db</span></div>';
 
   const rows = data.earnings.map(function(e) {
     const daysClass = e.daysUntil < 3 ? 'days-urgent' : e.daysUntil < 7 ? 'days-soon' : 'days-ok';
@@ -719,7 +737,12 @@ function renderSectorChart(sectorExposure) {
   }
   $('sector-section').style.display = 'block';
 
-  const sectors = Object.entries(sectorExposure).sort(function(a, b) { return b[1].pct - a[1].pct; });
+  const allSectors = Object.entries(sectorExposure).sort(function(a, b) { return b[1].pct - a[1].pct; });
+  // Filter out Unknown and Index sectors, then normalize remaining to sum to 1.0
+  const filtered = allSectors.filter(function(e) { return e[0] !== 'Unknown' && e[0] !== 'Index'; });
+  const rawSum = filtered.reduce(function(s, e) { return s + e[1].pct; }, 0);
+  const sectors = filtered.map(function(e) { return [e[0], { pct: rawSum > 0 ? e[1].pct / rawSum : e[1].pct }]; });
+  const totalInvestedPct = (rawSum * 100).toFixed(0);
   const size = 180;
   const cx = size / 2, cy = size / 2, r = 70, innerR = 42;
 
@@ -753,7 +776,8 @@ function renderSectorChart(sectorExposure) {
     startAngle = endAngle;
   });
 
-  const svg = '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'">' + svgPaths + '</svg>';
+  const centerText = '<text x="'+cx+'" y="'+(cy-6)+'" text-anchor="middle" font-size="12" font-weight="700" fill="var(--dark)">Portfólió</text><text x="'+cx+'" y="'+(cy+10)+'" text-anchor="middle" font-size="10" fill="var(--gray)">'+totalInvestedPct+'% befektetve</text>';
+  const svg = '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'">' + svgPaths + centerText + '</svg>';
   $('sector-chart-container').innerHTML = '<div>' + svg + '</div><div class="sector-legend">' + legendHtml + '</div>';
 }
 
@@ -784,12 +808,12 @@ async function refresh(){
 
       // Desktop table
       $('pos-body').innerHTML = p.positions.map(pos =>
-        '<tr><td class="mono">'+pos.ticker+'</td><td id="spark-'+pos.ticker+'"></td><td class="text-right">'+pos.shares+'</td><td class="text-right">'+fmt(pos.avgPrice)+'</td><td class="text-right">'+(pos.currentPrice?fmt(pos.currentPrice):'—')+'</td><td class="text-right '+cls(pos.pnl||0)+'">'+(pos.pnl!=null?fmt(pos.pnl):'—')+'</td><td class="text-right"><span class="badge '+badgeCls(pos.pnlPercent||0)+'">'+(pos.pnlPercent!=null?pct(pos.pnlPercent):'—')+'</span></td></tr>'
+        '<tr><td class="mono">'+pos.ticker+'<span style="color:var(--gray);font-weight:400;font-size:.75rem;margin-left:.35rem">'+companyName(pos.ticker)+'</span></td><td id="spark-'+pos.ticker+'"></td><td class="text-right">'+pos.shares+'</td><td class="text-right">'+fmt(pos.avgPrice)+'</td><td class="text-right">'+(pos.currentPrice?fmt(pos.currentPrice):'—')+'</td><td class="text-right '+cls(pos.pnl||0)+'">'+(pos.pnl!=null?fmt(pos.pnl):'—')+'</td><td class="text-right"><span class="badge '+badgeCls(pos.pnlPercent||0)+'">'+(pos.pnlPercent!=null?pct(pos.pnlPercent):'—')+'</span></td></tr>'
       ).join('');
 
       // Mobile cards
       $('pos-cards').innerHTML = p.positions.map(pos =>
-        '<div class="pos-card"><div class="pos-card-header"><span class="pos-card-ticker">'+pos.ticker+'</span><span class="badge '+badgeCls(pos.pnlPercent||0)+'">'+(pos.pnlPercent!=null?pct(pos.pnlPercent):'—')+'</span></div><dl class="pos-card-grid"><dt>Db</dt><dd>'+pos.shares+'</dd><dt>Átlagár</dt><dd>'+fmt(pos.avgPrice)+'</dd><dt>Aktuális</dt><dd>'+(pos.currentPrice?fmt(pos.currentPrice):'—')+'</dd><dt>P/L</dt><dd class="'+cls(pos.pnl||0)+'">'+(pos.pnl!=null?fmt(pos.pnl):'—')+'</dd></dl></div>'
+        '<div class="pos-card"><div class="pos-card-header"><span class="pos-card-ticker">'+pos.ticker+'<span style="color:var(--gray);font-weight:400;font-size:.75rem;margin-left:.35rem">'+companyName(pos.ticker)+'</span></span><span class="badge '+badgeCls(pos.pnlPercent||0)+'">'+(pos.pnlPercent!=null?pct(pos.pnlPercent):'—')+'</span></div><dl class="pos-card-grid"><dt>Db</dt><dd>'+pos.shares+'</dd><dt>Átlagár</dt><dd>'+fmt(pos.avgPrice)+'</dd><dt>Aktuális</dt><dd>'+(pos.currentPrice?fmt(pos.currentPrice):'—')+'</dd><dt>P/L</dt><dd class="'+cls(pos.pnl||0)+'">'+(pos.pnl!=null?fmt(pos.pnl):'—')+'</dd></dl></div>'
       ).join('');
 
       // Fetch sparklines async
@@ -837,13 +861,13 @@ async function refresh(){
     }
     if(picks.picks && picks.picks.length > 0){
       $('picks-list').innerHTML = picks.picks.map(p =>
-        '<div class="pick-card"><div class="pick-header"><span class="pick-ticker">'+p.ticker+'</span><div><span class="badge badge-blue">'+Math.round(p.confidence*100)+'% bizalom</span> <span style="font-size:.8rem;color:#64748b">Cél: '+fmt(p.targetPrice)+'</span></div></div><div class="pick-reason">'+p.reasoning+'</div><div class="pick-meta"><span>⏱ '+p.timeHorizon+'</span>'+(p.catalysts&&p.catalysts.length?'<span>🎯 '+p.catalysts.join(', ')+'</span>':'')+'</div></div>'
+        '<div class="pick-card"><div class="pick-header"><span class="pick-ticker">'+p.ticker+'</span><div><span class="badge badge-blue">'+Math.round(p.confidence*100)+'% bizalom</span> <span style="font-size:.8rem;color:#64748b">Cél: '+fmt(p.targetPrice)+'</span></div></div><div class="pick-reason">'+p.reasoning+'</div><div class="pick-meta"><span><svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> '+p.timeHorizon+'</span>'+(p.catalysts&&p.catalysts.length?'<span><svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg> '+p.catalysts.join(', ')+'</span>':'')+'</div></div>'
       ).join('');
     } else {
       $('picks-list').innerHTML = '<div class="empty">Még nincs AI elemzés. A napi elemzés 06:00 UTC-kor fut.</div>';
     }
     if(picks.warnings && picks.warnings.length > 0){
-      $('warns-list').innerHTML = '<div class="card-title" style="color:var(--red)">⚠️ Figyelmeztetések</div>' + picks.warnings.map(w =>
+      $('warns-list').innerHTML = '<div class="card-title" style="color:var(--red)"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0zM12 9v4m0 4h.01"/></svg> Figyelmeztetések</div>' + picks.warnings.map(w =>
         '<div class="warn-item"><div><span class="mono" style="color:var(--red)">'+w.ticker+'</span> <span style="margin-left:.5rem">'+w.reason+'</span></div><span class="badge badge-neg">'+w.urgency+'</span></div>'
       ).join('');
     }
@@ -885,9 +909,9 @@ async function refresh(){
   if(tradeData && tradeData.trades.length > 0){
     renderTradeStats(tradeData.trades);
 
-    $('trades-section').innerHTML = '<div class="table-wrap"><table class="table"><thead><tr><th>Típus</th><th>Ticker</th><th class="text-right">Db</th><th class="text-right">Ár</th><th class="text-right">Összeg</th><th>Indok</th></tr></thead><tbody>' + tradeData.trades.map(t =>
-      '<tr style="cursor:pointer" onclick="showTradeDetail('+t.id+')"><td><span class="badge '+(t.action==='buy'?'badge-buy':'badge-sell')+'">'+t.action.toUpperCase()+'</span></td><td class="mono">'+t.ticker+'</td><td class="text-right">'+t.shares+'</td><td class="text-right">'+fmt(t.price)+'</td><td class="text-right" style="font-weight:600">'+fmt(t.total)+'</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gray);font-size:.8rem">'+(t.reason||'—')+'</td></tr>'
-    ).join('') + '</tbody></table></div>';
+    $('trades-section').innerHTML = '<div class="table-wrap"><table class="table"><thead><tr><th>Típus</th><th>Ticker</th><th class="text-right">Db</th><th class="text-right">Összeg</th></tr></thead><tbody>' + tradeData.trades.map(t =>
+      '<tr style="cursor:pointer" onclick="showTradeDetail('+t.id+')"><td><span class="badge '+(t.action==='buy'?'badge-buy':'badge-sell')+'">'+t.action.toUpperCase()+'</span></td><td class="mono">'+t.ticker+'<span style="color:var(--gray);font-weight:400;font-size:.75rem;margin-left:.35rem">'+companyName(t.ticker)+'</span></td><td class="text-right">'+t.shares+'</td><td class="text-right" style="font-weight:600">'+fmt(t.total)+'</td></tr>'
+    ).join('') + '</tbody></table></div><div style="text-align:center;font-size:.7rem;color:var(--gray);margin-top:.5rem">Kattints egy sorra a részletekért</div>';
 
     // Build chart data from portfolio snapshots (cumulative approach)
     buildChartFromTrades(tradeData.trades, p);
@@ -949,7 +973,7 @@ async function triggerAll(){
   const btn = $('btn-refresh');
   const st = $('status-text');
   btn.disabled = true;
-  btn.textContent = '⏳ Futtatás...';
+  btn.innerHTML = '<span class="dot-pulse"></span> Futtatás...';
   st.innerHTML = '<span class="status-dot status-loading"></span> Adatok frissítése...';
   try {
     await fetch('/api/trigger/prices',{method:'POST'});
@@ -961,7 +985,7 @@ async function triggerAll(){
     st.innerHTML = '<span class="status-dot" style="background:var(--red)"></span> Hiba: ' + e.message;
   }
   btn.disabled = false;
-  btn.textContent = '🔄 Frissítés';
+  btn.innerHTML = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Frissítés';
 }
 
 // === PWA Registration ===
@@ -986,6 +1010,31 @@ if ('serviceWorker' in navigator) {
 }
 
 // === Notification Logic ===
+let lastKnownNewsId = 0;
+async function checkHighImpactNews() {
+  const data = await load('/news?limit=5');
+  if (!data || !data.items.length) return;
+  const latest = data.items[0];
+  if (lastKnownNewsId === 0) { lastKnownNewsId = latest.id; return; }
+
+  for (const item of data.items) {
+    if (item.id <= lastKnownNewsId) break;
+    if (item.impact >= 9 && item.sentiment > 0.5) {
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification('FONTOS HÍR — ' + (item.tickers||[]).join(', '), {
+          body: item.title + ' (Impact: ' + item.impact + '/10, Pozitív)',
+          tag: 'news-' + item.id
+        });
+      }
+      const banner = $('notif-banner');
+      banner.innerHTML = '<div style="font-weight:700;color:var(--green);margin-bottom:4px">FONTOS POZITÍV HÍR</div><div style="font-size:.8rem">' + item.title + '</div><div style="font-size:.7rem;color:var(--gray);margin-top:4px">' + (item.tickers||[]).join(', ') + ' \\u00b7 Impact ' + item.impact + '/10</div>';
+      banner.style.display = 'block';
+      setTimeout(() => { banner.style.display = 'none'; }, 15000);
+    }
+  }
+  lastKnownNewsId = data.items[0].id;
+}
+
 let lastKnownTradeId = 0;
 async function checkNewTrades() {
   const data = await load('/history?limit=1');
@@ -998,8 +1047,8 @@ async function checkNewTrades() {
   }
 }
 function notifyTrade(trade) {
-  const emoji = trade.action === 'buy' ? '🟢' : '🔴';
-  const msg = emoji + ' ' + trade.action.toUpperCase() + ' ' + trade.shares + ' ' + trade.ticker + ' @ ' + fmt(trade.price);
+  const dot = trade.action === 'buy' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green)"></span>' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--red)"></span>';
+  const msg = dot + ' ' + trade.action.toUpperCase() + ' ' + trade.shares + ' ' + trade.ticker + ' @ ' + fmt(trade.price);
 
   // In-app banner
   const banner = $('notif-banner');
@@ -1047,8 +1096,8 @@ async function showTradeDetail(tradeId) {
   }
 
   const t = data.trade;
-  const emoji = t.action === 'buy' ? '🟢 VÉTEL' : '🔴 ELADÁS';
-  $('modal-title').innerHTML = emoji + ' <span class="mono" style="color:var(--blue-dark)">' + t.ticker + '</span>';
+  const dot = t.action === 'buy' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);margin-right:6px"></span>VÉTEL' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--red);margin-right:6px"></span>ELADÁS';
+  $('modal-title').innerHTML = dot + ' <span class="mono" style="color:var(--blue-dark)">' + t.ticker + '</span>';
 
   let html = '<div class="modal-section"><h3>Trade Adatok</h3><table class="table"><tbody>';
   html += '<tr><td>Típus</td><td><span class="badge '+(t.action==='buy'?'badge-buy':'badge-sell')+'">' + t.action.toUpperCase() + '</span></td></tr>';
@@ -1060,17 +1109,17 @@ async function showTradeDetail(tradeId) {
 
   // Reasoning
   if (t.reason) {
-    html += '<div class="modal-section"><h3>🤖 AI Indoklás</h3><div class="modal-reason">' + t.reason + '</div></div>';
+    html += '<div class="modal-section"><h3><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="9" cy="16" r="1"/><circle cx="15" cy="16" r="1"/><path d="M12 2v4m-5 5V9a5 5 0 0110 0v2"/></svg> AI Indoklás</h3><div class="modal-reason">' + t.reason + '</div></div>';
   }
 
   // AI Outlook
   if (data.analysis?.outlook) {
-    html += '<div class="modal-section"><h3>📊 Piaci Kilátás</h3><div class="modal-reason">' + data.analysis.outlook + '</div></div>';
+    html += '<div class="modal-section"><h3><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg> Piaci Kilátás</h3><div class="modal-reason">' + data.analysis.outlook + '</div></div>';
   }
 
   // Related news
   if (data.relatedNews && data.relatedNews.length > 0) {
-    html += '<div class="modal-section"><h3>📰 Kapcsolódó Hírek (' + data.relatedNews.length + ')</h3>';
+    html += '<div class="modal-section"><h3><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h16a2 2 0 002-2V4a2 2 0 00-2-2H8a2 2 0 00-2 2v16a2 2 0 01-2 2zm0 0a2 2 0 01-2-2v-9c0-1.1.9-2 2-2h2m2-4h6m-6 4h6m-6 4h4"/></svg> Kapcsolódó Hírek (' + data.relatedNews.length + ')</h3>';
     for (const n of data.relatedNews.slice(0, 5)) {
       const sentLabel = n.sentiment > 0.3 ? 'Pozitív' : n.sentiment < -0.3 ? 'Negatív' : 'Semleges';
       const sentCls = n.sentiment > 0.3 ? 'badge-pos' : n.sentiment < -0.3 ? 'badge-neg' : 'badge-neutral';
@@ -1082,7 +1131,7 @@ async function showTradeDetail(tradeId) {
     }
     html += '</div>';
   } else {
-    html += '<div class="modal-section"><h3>📰 Kapcsolódó Hírek</h3><div class="empty">Nincs közvetlenül kapcsolódó hír ehhez a tickerhez.</div></div>';
+    html += '<div class="modal-section"><h3><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h16a2 2 0 002-2V4a2 2 0 00-2-2H8a2 2 0 00-2 2v16a2 2 0 01-2 2zm0 0a2 2 0 01-2-2v-9c0-1.1.9-2 2-2h2m2-4h6m-6 4h6m-6 4h4"/></svg> Kapcsolódó Hírek</h3><div class="empty">Nincs közvetlenül kapcsolódó hír ehhez a tickerhez.</div></div>';
   }
 
   $('modal-content').innerHTML = html;
@@ -1095,6 +1144,7 @@ const origRefresh = refresh;
 refresh = async function() {
   await origRefresh();
   checkNewTrades();
+  checkHighImpactNews();
 };
 
 // === Alerts Panel ===

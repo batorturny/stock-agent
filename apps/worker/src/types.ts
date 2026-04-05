@@ -1,7 +1,7 @@
 export type Env = {
   DB: D1Database;
   CACHE: KVNamespace;
-  ANTHROPIC_API_KEY: string;
+  GEMINI_API_KEY: string;
   FINNHUB_API_KEY: string;
   ENVIRONMENT: string;
   API_SECRET?: string;

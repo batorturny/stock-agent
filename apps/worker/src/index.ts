@@ -51,6 +51,19 @@ app.use("/api/*", async (c, next) => {
   return next();
 });
 
+// Dashboard — full inline SPA
+import { DASHBOARD_HTML } from "./dashboard";
+import { MANIFEST_JSON, SERVICE_WORKER_JS } from "./pwa";
+app.get("/", (c) => c.html(DASHBOARD_HTML));
+app.get("/manifest.json", (c) => {
+  return c.json(JSON.parse(MANIFEST_JSON));
+});
+app.get("/sw.js", (_c) => {
+  return new Response(SERVICE_WORKER_JS, {
+    headers: { "Content-Type": "application/javascript", "Service-Worker-Allowed": "/" },
+  });
+});
+
 // Health check
 app.get("/api/health", (c) =>
   c.json({ status: "ok", timestamp: new Date().toISOString() })
@@ -160,6 +173,56 @@ app.get("/api/history", async (c) => {
   return c.json({ trades: filtered, total: filtered.length });
 });
 
+// Trade detail — trade + related news + AI reasoning
+app.get("/api/trades/:id", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (isNaN(id)) return c.json({ error: "Invalid trade ID" }, 400);
+
+  const db = drizzle(c.env.DB);
+  const [trade] = await db.select().from(trades).where(eq(trades.id, id)).limit(1);
+  if (!trade) return c.json({ error: "Trade not found" }, 404);
+
+  // Find related news (same ticker, within 24h before trade)
+  const tradeTime = new Date(trade.executedAt);
+  const dayBefore = new Date(tradeTime.getTime() - 24 * 60 * 60 * 1000).toISOString();
+  const relatedNews = await db
+    .select()
+    .from(news)
+    .where(gte(news.scrapedAt, dayBefore))
+    .orderBy(desc(news.scrapedAt))
+    .limit(100);
+
+  const tickerNews = relatedNews.filter((n) => {
+    const tickers: string[] = n.tickers ? safeParse<string[]>(n.tickers, []) : [];
+    return tickers.includes(trade.ticker);
+  });
+
+  // Find the analysis that triggered this trade
+  const [relatedAnalysis] = await db
+    .select()
+    .from(analysis)
+    .where(gte(analysis.createdAt, dayBefore))
+    .orderBy(desc(analysis.createdAt))
+    .limit(1);
+
+  return c.json({
+    trade,
+    relatedNews: tickerNews.map((n) => ({
+      ...n,
+      tickers: n.tickers ? safeParse<string[]>(n.tickers, []) : [],
+    })),
+    analysis: relatedAnalysis
+      ? {
+          outlook: relatedAnalysis.outlook,
+          picks: safeParse(relatedAnalysis.picks, []),
+          warnings: relatedAnalysis.riskWarnings
+            ? safeParse(relatedAnalysis.riskWarnings, [])
+            : [],
+        }
+      : null,
+  });
+});
+
 // Weekly/daily reports
 app.get("/api/report", async (c) => {
   const db = drizzle(c.env.DB);
@@ -186,6 +249,34 @@ app.get("/api/report", async (c) => {
       riskWarnings: r.riskWarnings ? safeParse(r.riskWarnings, null) : null,
     })),
   });
+});
+
+// Manual trigger endpoints (bypass cron limits)
+app.post("/api/trigger/prices", async (c) => {
+  try {
+    await handlePriceFetch(c.env);
+    return c.json({ ok: true, message: "Price fetch completed" });
+  } catch (e) {
+    return c.json({ ok: false, error: String(e) }, 500);
+  }
+});
+
+app.post("/api/trigger/news", async (c) => {
+  try {
+    await handleNewsScrape(c.env);
+    return c.json({ ok: true, message: "News scrape completed" });
+  } catch (e) {
+    return c.json({ ok: false, error: String(e) }, 500);
+  }
+});
+
+app.post("/api/trigger/analysis", async (c) => {
+  try {
+    await handleDailyAnalysis(c.env);
+    return c.json({ ok: true, message: "Daily analysis completed" });
+  } catch (e) {
+    return c.json({ ok: false, error: String(e) }, 500);
+  }
 });
 
 // Cron trigger handler

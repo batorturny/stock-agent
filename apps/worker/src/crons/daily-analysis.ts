@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { news, prices, analysis } from "../db/schema";
 import { runDailyAnalysis } from "../services/ai-analyst";
 import { getAccountState, executeTrade } from "../services/portfolio";
+import { getCachedPrice } from "../services/price-api";
 import type { Env } from "../types";
 
 export async function handleDailyAnalysis(env: Env): Promise<void> {
@@ -92,22 +93,27 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
     createdAt: now.toISOString(),
   });
 
-  // 7. Auto-execute portfolio actions with guardrails
-  // Only execute buys if there's a matching pick with 70%+ confidence
-  const confidentTickers = new Set(
-    result.buyPicks
-      .filter((p) => p.confidence >= 0.7)
-      .map((p) => p.ticker)
-  );
+  // 7. Auto-execute: buy top confident picks directly
+  const currentState = await getAccountState(env);
+  const openTickers = new Set(currentState.positions.map((p) => p.ticker));
 
-  for (const action of result.portfolioActions) {
-    if (action.action === "hold") continue;
-    // Buy actions require a confident pick backing them
-    if (action.action === "buy" && !confidentTickers.has(action.ticker)) {
-      console.log(`Skipping buy ${action.ticker}: no 70%+ confidence pick`);
-      continue;
-    }
-    const result_trade = await executeTrade(action, env);
-    console.log(`Trade ${action.action} ${action.ticker}: ${result_trade.reason}`);
+  for (const pick of result.buyPicks) {
+    if (pick.confidence < 0.7) continue;
+    if (openTickers.has(pick.ticker)) continue; // already holding
+
+    // Calculate shares: allocate ~15% of total value per position
+    const allocAmount = currentState.totalValue * 0.15;
+    const currentPrice = (await getCachedPrice(pick.ticker, env))?.price;
+    if (!currentPrice) continue;
+    const shares = Math.floor(allocAmount / currentPrice);
+    if (shares <= 0) continue;
+
+    console.log(`Auto-buy: ${shares} ${pick.ticker} @ $${currentPrice} (${(pick.confidence*100).toFixed(0)}% conf)`);
+    const tradeResult = await executeTrade(
+      { action: "buy", ticker: pick.ticker, shares, reason: pick.reasoning },
+      env
+    );
+    console.log(`Trade result: ${tradeResult.success} - ${tradeResult.reason}`);
+    if (tradeResult.success) openTickers.add(pick.ticker);
   }
 }

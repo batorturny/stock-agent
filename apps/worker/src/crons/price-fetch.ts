@@ -1,18 +1,24 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { portfolio, prices } from "../db/schema";
-import { fetchQuotes, isMarketOpen, updatePriceCache } from "../services/price-api";
+import { fetchQuotes, updatePriceCache } from "../services/price-api";
 import { checkStopLossAndTakeProfit } from "../services/portfolio";
 import type { Env } from "../types";
 
-// Watchlist of popular tickers to always track
+// NYSE + NASDAQ top blue chips watchlist
 const DEFAULT_WATCHLIST = [
+  // Mega-cap tech (NASDAQ/NYSE)
   "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA",
-  "META", "TSLA", "JPM", "V", "WMT",
+  "META", "TSLA",
+  // NYSE blue chips
+  "JPM", "V", "WMT", "JNJ", "UNH",
+  "PG", "HD", "BAC", "DIS", "KO",
+  // Growth / momentum
+  "CRM", "AMD", "NFLX",
 ];
 
 export async function handlePriceFetch(env: Env): Promise<void> {
-  if (!isMarketOpen()) return;
+  // Skip market hours check — always fetch (Finnhub returns last known price when market closed)
 
   const db = drizzle(env.DB);
 

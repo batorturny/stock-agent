@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { portfolio, trades, account } from "../db/schema";
 import type { Env, PortfolioAction, AccountState, PortfolioPosition } from "../types";
 import { PORTFOLIO_RULES } from "../types";
-import { getCachedPrice } from "./price-api";
+import { getCachedPrice, fetchQuote, updatePriceCache } from "./price-api";
 
 function getDb(env: Env) {
   return drizzle(env.DB);
@@ -90,8 +90,14 @@ export async function executeTrade(
   const [acct] = await db.select().from(account).limit(1);
   if (!acct) return { success: false, reason: "No account found" };
 
-  const cached = await getCachedPrice(action.ticker, env);
-  if (!cached) return { success: false, reason: `No price data for ${action.ticker}` };
+  let cached = await getCachedPrice(action.ticker, env);
+  if (!cached) {
+    // Cache expired — fetch fresh price from Finnhub
+    const quote = await fetchQuote(action.ticker, env);
+    if (!quote) return { success: false, reason: `No price data for ${action.ticker}` };
+    await updatePriceCache(action.ticker, quote, env);
+    cached = { price: quote.c, change: quote.d, changePercent: quote.dp, updatedAt: new Date().toISOString() };
+  }
 
   const price = cached.price;
   const total = price * action.shares;

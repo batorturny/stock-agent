@@ -1,5 +1,40 @@
 import type { Env, DailyAnalysis } from "../types";
 
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+const MODEL = "gemini-2.0-flash";
+
+async function callGemini(
+  prompt: string,
+  env: Env,
+  maxTokens = 4096
+): Promise<string> {
+  const response = await fetch(
+    `${GEMINI_BASE}/${MODEL}:generateContent?key=${env.GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          maxOutputTokens: maxTokens,
+          temperature: 0.3,
+        },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    console.error(`Gemini API error: ${response.status}`);
+    throw new Error("AI analysis service unavailable");
+  }
+
+  const data = (await response.json()) as {
+    candidates?: { content?: { parts?: { text?: string }[] } }[];
+  };
+
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+}
+
 const DAILY_ANALYSIS_PROMPT = `You are a professional stock market analyst AI. Based on the data below, provide detailed analysis and recommendations.
 
 ## Current Portfolio
@@ -16,7 +51,7 @@ const DAILY_ANALYSIS_PROMPT = `You are a professional stock market analyst AI. B
 
 ---
 
-Respond ONLY with valid JSON in this exact format:
+Respond ONLY with valid JSON in this exact format (no markdown, no code blocks, just raw JSON):
 
 {
   "buyPicks": [
@@ -56,7 +91,8 @@ RULES:
 - Back every recommendation with specific news/data
 - Diversify across sectors
 - Flag the biggest risks
-- Be realistic, don't hype`;
+- Be realistic, don't hype
+- Only use NYSE/NASDAQ listed US stocks`;
 
 export async function runDailyAnalysis(
   portfolioState: string,
@@ -71,31 +107,8 @@ export async function runDailyAnalysis(
     .replace("{news_trends}", newsTrends)
     .replace("{price_history}", priceHistory);
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 4096,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
+  const text = await callGemini(prompt, env);
 
-  if (!response.ok) {
-    console.error(`Anthropic API error: ${response.status}`);
-    throw new Error("AI analysis service unavailable");
-  }
-
-  const data = (await response.json()) as {
-    content: { type: string; text: string }[];
-  };
-  const text = data.content[0]?.text || "{}";
-
-  // Extract JSON from response (may be wrapped in markdown code blocks)
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
     throw new Error("No valid JSON found in AI response");
@@ -115,51 +128,24 @@ export async function analyzeSentiment(
   impact: number;
   timeHorizon: string;
 }> {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 256,
-      messages: [
-        {
-          role: "user",
-          content: `Analyze this financial news headline and summary. Return JSON only.
+  try {
+    const text = await callGemini(
+      `Analyze this financial news headline. Return ONLY raw JSON, no markdown.
 
 Title: ${title}
 Summary: ${summary}
 
-{
-  "tickers": ["AAPL"],
-  "sentiment": 0.5,
-  "impact": 5,
-  "timeHorizon": "week"
-}
+{"tickers":["AAPL"],"sentiment":0.5,"impact":5,"timeHorizon":"week"}
 
-tickers: affected stock tickers (empty array if none). sentiment: -1.0 to 1.0. impact: 0-10. timeHorizon: immediate|week|month|long.`,
-        },
-      ],
-    }),
-  });
+tickers: affected US stock tickers (empty array if none). sentiment: -1.0 to 1.0. impact: 0-10. timeHorizon: immediate|week|month|long.`,
+      env,
+      256
+    );
 
-  if (!response.ok) {
-    return { tickers: [], sentiment: 0, impact: 0, timeHorizon: "week" };
-  }
-
-  const data = (await response.json()) as {
-    content: { type: string; text: string }[];
-  };
-  const text = data.content[0]?.text || "{}";
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    return { tickers: [], sentiment: 0, impact: 0, timeHorizon: "week" };
-  }
-
-  try {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return { tickers: [], sentiment: 0, impact: 0, timeHorizon: "week" };
+    }
     return JSON.parse(jsonMatch[0]);
   } catch {
     return { tickers: [], sentiment: 0, impact: 0, timeHorizon: "week" };

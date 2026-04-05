@@ -24,6 +24,8 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
 .last-refresh{font-size:.7rem;color:var(--gray);opacity:.8}
 .btn{padding:6px 14px;border-radius:8px;border:none;font-size:.75rem;font-weight:600;cursor:pointer;transition:all .15s}
 .btn-blue{background:var(--blue);color:white}.btn-blue:hover{background:var(--blue-dark)}
+.risk-select{padding:5px 10px;border-radius:8px;border:1px solid var(--card-border);font-size:.75rem;font-weight:600;background:var(--card-bg);color:var(--dark);cursor:pointer;outline:none;transition:border-color .15s}
+.risk-select:hover,.risk-select:focus{border-color:var(--blue)}
 .btn-outline{background:transparent;border:1px solid var(--card-border);color:var(--gray)}.btn-outline:hover{border-color:var(--blue);color:var(--blue)}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px}
@@ -106,6 +108,40 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
 .chart-area{fill:url(#chartGradient);opacity:.3}
 .chart-dot{fill:var(--blue);r:3}
 .chart-dot:last-of-type{r:4;stroke:white;stroke-width:2}
+
+/* Performance comparison chart */
+.perf-line-portfolio{fill:none;stroke:var(--blue);stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
+.perf-line-spy{fill:none;stroke:var(--gray);stroke-width:2;stroke-dasharray:6,3;stroke-linejoin:round;stroke-linecap:round}
+.perf-legend{display:flex;gap:1.5rem;margin-top:.5rem;font-size:.75rem;color:var(--gray)}
+.perf-legend-item{display:flex;align-items:center;gap:.35rem}
+.perf-legend-dot{width:12px;height:3px;border-radius:2px}
+.perf-excess{font-size:.85rem;font-weight:700;margin-top:.5rem}
+
+/* Macro cards */
+.macro-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1.25rem}
+.macro-card{background:var(--card-bg);border-radius:12px;padding:1rem 1.25rem;border:1px solid var(--card-border);box-shadow:0 1px 3px var(--card-shadow);transition:background .3s}
+.macro-value{font-size:1.5rem;font-weight:700}
+.macro-change{font-size:.8rem;margin-top:.15rem}
+.macro-label{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--gray);margin-bottom:.5rem;font-weight:600}
+.macro-status{font-size:.7rem;margin-top:.25rem;font-weight:600}
+.vix-low{color:var(--green)}.vix-mid{color:#f59e0b}.vix-high{color:var(--red)}
+
+/* Earnings table */
+.earnings-row{display:flex;align-items:center;justify-content:space-between;padding:.5rem .75rem;border-bottom:1px solid var(--table-border);font-size:.85rem}
+.earnings-row:last-child{border-bottom:none}
+.earnings-ticker{font-family:monospace;font-weight:700;color:var(--blue-dark);min-width:60px}
+.earnings-days{font-weight:700;min-width:50px;text-align:center}
+.days-urgent{color:var(--red)}.days-soon{color:#f59e0b}.days-ok{color:var(--green)}
+
+/* Sector donut chart */
+.sector-legend{display:flex;flex-wrap:wrap;gap:.5rem .75rem;margin-top:.75rem;font-size:.75rem}
+.sector-legend-item{display:flex;align-items:center;gap:.3rem}
+.sector-legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+
+@media(max-width:768px){
+  .macro-grid{grid-template-columns:1fr}
+  .perf-legend{flex-wrap:wrap;gap:.75rem}
+}
 
 /* Trade stats */
 .trade-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:.75rem;margin-bottom:1rem}
@@ -227,6 +263,11 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
     <span id="status-text"><span class="status-dot status-ok"></span> NYSE Watchlist</span>
     <span class="last-refresh" id="last-refresh"></span>
     <button class="btn btn-blue" id="btn-refresh" onclick="triggerAll()">🔄 Frissítés</button>
+    <select class="risk-select" id="risk-select" onchange="changeRiskProfile(this.value)" title="Kockázati profil">
+      <option value="conservative">Konzervatív</option>
+      <option value="balanced" selected>Kiegyensúlyozott</option>
+      <option value="aggressive">Agresszív</option>
+    </select>
     <span>$5,000 Induló Tőke</span>
   </div>
 </div>
@@ -257,6 +298,35 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
     <div class="card"><div class="card-title">Szabad Tőke</div><div class="stat-value" id="s-cash" data-key="cash">—</div><div class="stat-label">Készpénz egyenleg</div></div>
     <div class="card"><div class="card-title">Nyereség / Veszteség</div><div class="stat-value" id="s-pnl" data-key="pnl">—</div><div class="stat-label" id="s-pnl-pct"></div></div>
     <div class="card"><div class="card-title">Nyitott Pozíciók</div><div class="stat-value" id="s-pos" data-key="pos">—</div><div class="stat-label">Részvények</div></div>
+  </div>
+
+  <!-- Performance vs SPY Chart -->
+  <div class="chart-card" id="perf-chart-section" style="display:none">
+    <div class="card-title">📊 Teljesítmény vs. S&P 500</div>
+    <div id="perf-chart-container"></div>
+    <div class="perf-legend">
+      <div class="perf-legend-item"><div class="perf-legend-dot" style="background:var(--blue)"></div> Portfólió</div>
+      <div class="perf-legend-item"><div class="perf-legend-dot" style="background:var(--gray);border-top:2px dashed var(--gray);height:0;width:12px"></div> S&P 500 (SPY)</div>
+    </div>
+    <div class="perf-excess" id="perf-excess"></div>
+  </div>
+
+  <!-- Macro Indicators -->
+  <div id="macro-section" style="display:none;margin-bottom:1.25rem">
+    <div class="card-title" style="margin-bottom:.75rem">🌍 Makro Indikátorok</div>
+    <div class="macro-grid" id="macro-grid"></div>
+  </div>
+
+  <!-- Earnings Calendar -->
+  <div class="card" id="earnings-section" style="margin-bottom:1.25rem;display:none">
+    <div class="card-title">📅 Earnings Naptár</div>
+    <div id="earnings-list"></div>
+  </div>
+
+  <!-- Sector Allocation -->
+  <div class="card" id="sector-section" style="margin-bottom:1.25rem;display:none">
+    <div class="card-title">🥧 Szektor Allokáció</div>
+    <div id="sector-chart-container" style="display:flex;align-items:flex-start;gap:1rem;flex-wrap:wrap"></div>
   </div>
 
   <!-- Positions Table -->
@@ -496,6 +566,197 @@ async function fetchSparkline(ticker) {
   return null;
 }
 
+// ─── Performance vs SPY chart ───
+function renderPerfChart(portfolioData, spy) {
+  if (!portfolioData || portfolioData.length < 2) { $('perf-chart-section').style.display = 'none'; return; }
+  $('perf-chart-section').style.display = 'block';
+
+  const W = 800, H = 220, PAD_L = 55, PAD_R = 15, PAD_T = 20, PAD_B = 30;
+  const chartW = W - PAD_L - PAD_R;
+  const chartH = H - PAD_T - PAD_B;
+
+  // Combine all return values for scale
+  const allReturns = portfolioData.map(d => d.returnPct);
+  if (spy.length > 0) spy.forEach(d => allReturns.push(d.returnPct));
+  const minR = Math.min(0, ...allReturns) - 1;
+  const maxR = Math.max(0, ...allReturns) + 1;
+  const rangeR = maxR - minR || 1;
+
+  function toPoint(idx, total, val) {
+    const x = PAD_L + (idx / Math.max(total - 1, 1)) * chartW;
+    const y = PAD_T + chartH - ((val - minR) / rangeR) * chartH;
+    return { x, y };
+  }
+
+  // Portfolio line
+  const portPts = portfolioData.map((d, i) => {
+    const p = toPoint(i, portfolioData.length, d.returnPct);
+    return p.x.toFixed(1) + ',' + p.y.toFixed(1);
+  }).join(' ');
+
+  // SPY line (align by date)
+  let spyPts = '';
+  const spyByDate = {};
+  spy.forEach(d => { spyByDate[d.date] = d.returnPct; });
+  const spyAligned = portfolioData.map(d => spyByDate[d.date]).filter(v => v !== undefined);
+  if (spyAligned.length >= 2) {
+    spyPts = spyAligned.map((val, i) => {
+      const p = toPoint(i, spyAligned.length, val);
+      return p.x.toFixed(1) + ',' + p.y.toFixed(1);
+    }).join(' ');
+  }
+
+  // Area between lines (green if outperforming, red if underperforming)
+  let areaPath = '';
+  if (spyAligned.length === portfolioData.length && portfolioData.length >= 2) {
+    const pts = [];
+    for (let i = 0; i < portfolioData.length; i++) {
+      const pp = toPoint(i, portfolioData.length, portfolioData[i].returnPct);
+      pts.push({ x: pp.x, yPort: pp.y, ySpy: toPoint(i, portfolioData.length, spyAligned[i]).y });
+    }
+    let polyPts = pts.map(p => p.x.toFixed(1) + ',' + p.yPort.toFixed(1)).join(' ');
+    polyPts += ' ' + pts.slice().reverse().map(p => p.x.toFixed(1) + ',' + p.ySpy.toFixed(1)).join(' ');
+
+    const lastPort = portfolioData[portfolioData.length - 1].returnPct;
+    const lastSpy = spyAligned[spyAligned.length - 1];
+    const areaColor = lastPort >= lastSpy ? 'rgba(22,163,74,0.15)' : 'rgba(220,38,38,0.15)';
+    areaPath = '<polygon points="' + polyPts + '" fill="' + areaColor + '"/>';
+  }
+
+  // Zero line
+  const zeroY = PAD_T + chartH - ((0 - minR) / rangeR) * chartH;
+
+  // Grid lines
+  const gridCount = 4;
+  let gridLines = '';
+  for (let i = 0; i <= gridCount; i++) {
+    const y = PAD_T + (i / gridCount) * chartH;
+    const val = maxR - (i / gridCount) * rangeR;
+    gridLines += '<line x1="'+PAD_L+'" y1="'+y.toFixed(1)+'" x2="'+(W-PAD_R)+'" y2="'+y.toFixed(1)+'" class="chart-grid" stroke-dasharray="4,4"/>';
+    gridLines += '<text x="'+(PAD_L-8)+'" y="'+(y+4).toFixed(1)+'" text-anchor="end" class="chart-label">'+(val>=0?'+':'')+val.toFixed(1)+'%</text>';
+  }
+
+  // X-axis labels
+  let xLabels = '';
+  const step = Math.max(1, Math.floor(portfolioData.length / 5));
+  for (let i = 0; i < portfolioData.length; i += step) {
+    const x = PAD_L + (i / Math.max(portfolioData.length - 1, 1)) * chartW;
+    const d = portfolioData[i].date;
+    const label = d.slice(5);
+    xLabels += '<text x="'+x.toFixed(1)+'" y="'+(H-5)+'" text-anchor="middle" class="chart-label">'+label+'</text>';
+  }
+
+  const svg = '<svg viewBox="0 0 '+W+' '+H+'" class="chart-svg" preserveAspectRatio="xMidYMid meet">' +
+    gridLines + xLabels +
+    '<line x1="'+PAD_L+'" y1="'+zeroY.toFixed(1)+'" x2="'+(W-PAD_R)+'" y2="'+zeroY.toFixed(1)+'" stroke="var(--gray)" stroke-width="1" stroke-dasharray="2,2" opacity=".5"/>' +
+    areaPath +
+    (spyPts ? '<polyline points="'+spyPts+'" class="perf-line-spy"/>' : '') +
+    '<polyline points="'+portPts+'" class="perf-line-portfolio"/>' +
+    '</svg>';
+
+  $('perf-chart-container').innerHTML = svg;
+}
+
+// ─── Macro indicators ───
+function renderMacro(data) {
+  if (!data || (!data.vix && !data.treasury10y && !data.sp500)) {
+    $('macro-section').style.display = 'none';
+    return;
+  }
+  $('macro-section').style.display = 'block';
+
+  let html = '';
+
+  if (data.vix) {
+    const v = data.vix.value;
+    const vixClass = v < 15 ? 'vix-low' : v < 25 ? 'vix-mid' : 'vix-high';
+    const vixLabel = v < 15 ? 'Alacsony félelem' : v < 25 ? 'Közepes' : 'Magas félelem';
+    html += '<div class="macro-card"><div class="macro-label">VIX — Félelem Index</div><div class="macro-value '+vixClass+'">'+v.toFixed(1)+'</div><div class="macro-change '+(data.vix.change>=0?'positive':'negative')+'">'+pct(data.vix.change)+'</div><div class="macro-status '+vixClass+'">'+vixLabel+'</div></div>';
+  }
+
+  if (data.treasury10y) {
+    html += '<div class="macro-card"><div class="macro-label">10 éves kincstárjegy</div><div class="macro-value">'+data.treasury10y.value.toFixed(2)+'%</div><div class="macro-change '+(data.treasury10y.change>=0?'positive':'negative')+'">'+pct(data.treasury10y.change)+'</div></div>';
+  }
+
+  if (data.sp500) {
+    html += '<div class="macro-card"><div class="macro-label">S&P 500 (SPY)</div><div class="macro-value">'+fmt(data.sp500.value)+'</div><div class="macro-change '+(data.sp500.changePct>=0?'positive':'negative')+'">'+pct(data.sp500.changePct)+'</div>'+(data.sp500.ytdReturn!=null?'<div class="macro-status" style="color:var(--gray)">YTD: <span class="'+(data.sp500.ytdReturn>=0?'positive':'negative')+'">'+pct(data.sp500.ytdReturn)+'</span></div>':'')+'</div>';
+  }
+
+  $('macro-grid').innerHTML = html;
+}
+
+// ─── Earnings calendar ───
+function renderEarnings(data) {
+  if (!data || !data.earnings || data.earnings.length === 0) {
+    $('earnings-section').style.display = 'none';
+    return;
+  }
+  $('earnings-section').style.display = 'block';
+
+  const header = '<div class="earnings-row" style="font-weight:600;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--gray)"><span style="min-width:60px">Ticker</span><span style="flex:1">Dátum</span><span style="min-width:50px;text-align:center">Napok</span><span style="min-width:80px;text-align:right">EPS Becslés</span></div>';
+
+  const rows = data.earnings.map(function(e) {
+    const daysClass = e.daysUntil < 3 ? 'days-urgent' : e.daysUntil < 7 ? 'days-soon' : 'days-ok';
+    const eps = e.estimateEps != null ? '$' + e.estimateEps.toFixed(2) : '—';
+    return '<div class="earnings-row"><span class="earnings-ticker">'+e.ticker+'</span><span style="flex:1">'+e.reportDate+'</span><span class="earnings-days '+daysClass+'">'+e.daysUntil+' nap</span><span style="min-width:80px;text-align:right">'+eps+'</span></div>';
+  }).join('');
+
+  $('earnings-list').innerHTML = header + rows;
+}
+
+// ─── Sector allocation donut chart ───
+const SECTOR_COLORS = {
+  Technology: '#3b82f6', Financial: '#f59e0b', Healthcare: '#10b981',
+  Consumer: '#8b5cf6', Energy: '#ef4444', Industrial: '#6366f1',
+  Communication: '#ec4899', Index: '#64748b', Unknown: '#94a3b8',
+  Materials: '#14b8a6', Utilities: '#f97316', 'Real Estate': '#06b6d4'
+};
+
+function renderSectorChart(sectorExposure) {
+  if (!sectorExposure || Object.keys(sectorExposure).length === 0) {
+    $('sector-section').style.display = 'none';
+    return;
+  }
+  $('sector-section').style.display = 'block';
+
+  const sectors = Object.entries(sectorExposure).sort(function(a, b) { return b[1].pct - a[1].pct; });
+  const size = 180;
+  const cx = size / 2, cy = size / 2, r = 70, innerR = 42;
+
+  let svgPaths = '';
+  let legendHtml = '';
+  let startAngle = -Math.PI / 2;
+
+  sectors.forEach(function(entry) {
+    const name = entry[0];
+    const data = entry[1];
+    const pctVal = data.pct;
+    if (pctVal <= 0) return;
+    const sliceAngle = pctVal * 2 * Math.PI;
+    const endAngle = startAngle + sliceAngle;
+    const largeArc = sliceAngle > Math.PI ? 1 : 0;
+    const color = SECTOR_COLORS[name] || '#94a3b8';
+
+    const x1 = cx + r * Math.cos(startAngle);
+    const y1 = cy + r * Math.sin(startAngle);
+    const x2 = cx + r * Math.cos(endAngle);
+    const y2 = cy + r * Math.sin(endAngle);
+    const ix1 = cx + innerR * Math.cos(endAngle);
+    const iy1 = cy + innerR * Math.sin(endAngle);
+    const ix2 = cx + innerR * Math.cos(startAngle);
+    const iy2 = cy + innerR * Math.sin(startAngle);
+
+    svgPaths += '<path d="M '+x1.toFixed(2)+' '+y1.toFixed(2)+' A '+r+' '+r+' 0 '+largeArc+' 1 '+x2.toFixed(2)+' '+y2.toFixed(2)+' L '+ix1.toFixed(2)+' '+iy1.toFixed(2)+' A '+innerR+' '+innerR+' 0 '+largeArc+' 0 '+ix2.toFixed(2)+' '+iy2.toFixed(2)+' Z" fill="'+color+'" stroke="var(--card-bg)" stroke-width="2"/>';
+
+    legendHtml += '<div class="sector-legend-item"><div class="sector-legend-dot" style="background:'+color+'"></div>'+name+' '+(pctVal * 100).toFixed(1)+'%</div>';
+
+    startAngle = endAngle;
+  });
+
+  const svg = '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'">' + svgPaths + '</svg>';
+  $('sector-chart-container').innerHTML = '<div>' + svg + '</div><div class="sector-legend">' + legendHtml + '</div>';
+}
+
 async function refresh(){
   lastRefreshTime = Date.now();
   updateRefreshTimer();
@@ -541,6 +802,31 @@ async function refresh(){
       $('positions-section').style.display='none';
     }
   }
+
+  // Performance vs SPY
+  const perfData = await load('/performance');
+  if (perfData) {
+    renderPerfChart(perfData.portfolio, perfData.spy);
+    const exEl = $('perf-excess');
+    if (perfData.excessReturn !== 0) {
+      const exCls = perfData.excessReturn >= 0 ? 'positive' : 'negative';
+      exEl.innerHTML = 'Többlethozam (alpha): <span class="'+exCls+'">' + pct(perfData.excessReturn) + '</span>';
+    } else {
+      exEl.textContent = '';
+    }
+  }
+
+  // Macro indicators
+  const macroData = await load('/macro');
+  if (macroData) renderMacro(macroData);
+
+  // Earnings calendar
+  const earningsData = await load('/earnings');
+  if (earningsData) renderEarnings(earningsData);
+
+  // Sector allocation
+  const metricsData = await load('/metrics');
+  if (metricsData && metricsData.sectorExposure) renderSectorChart(metricsData.sectorExposure);
 
   // Picks
   const picks = await load('/picks');
@@ -840,8 +1126,33 @@ function renderAlerts() {
   }).join('');
 }
 
+// === Risk Profile ===
+async function loadRiskProfile() {
+  try {
+    var data = await load('/settings');
+    if (data && data.riskLevel) {
+      var sel = $('risk-select');
+      sel.value = data.riskLevel;
+    }
+  } catch(e) { console.error('Risk profile load error:', e); }
+}
+async function changeRiskProfile(level) {
+  try {
+    var r = await fetch('/api/settings/risk-profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ level: level })
+    });
+    if (!r.ok) throw new Error('Failed');
+    var st = $('status-text');
+    st.innerHTML = '<span class="status-dot status-ok"></span> Profil: ' + $('risk-select').options[$('risk-select').selectedIndex].text;
+    setTimeout(function() { st.innerHTML = '<span class="status-dot status-ok"></span> NYSE Watchlist'; }, 3000);
+  } catch(e) { console.error('Risk profile change error:', e); }
+}
+
 refresh();
 loadAlerts();
+loadRiskProfile();
 // Auto-refresh display every 60s, auto-trigger data fetch every 15 min
 setInterval(refresh, 60000);
 setInterval(triggerAll, 15 * 60000);

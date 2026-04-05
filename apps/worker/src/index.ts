@@ -3,15 +3,17 @@ import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { and, desc, eq, gte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { trades, news, prices, analysis } from "./db/schema";
+import { trades, news, prices, analysis, dailySnapshots, earningsCalendar, portfolio } from "./db/schema";
 import { getAccountState } from "./services/portfolio";
-import { getCachedPrice } from "./services/price-api";
+import { getCachedPrice, fetchQuote } from "./services/price-api";
 import { computePortfolioMetrics, getSectorExposure } from "./services/risk-manager";
 import { getCachedWatchlist, getCachedSectorPerformance, getCompanyProfile } from "./services/stock-screener";
 import { handlePriceFetch } from "./crons/price-fetch";
 import { handleNewsScrape } from "./crons/news-scrape";
 import { handleDailyAnalysis } from "./crons/daily-analysis";
 import { handleWeeklyReport } from "./crons/weekly-report";
+import { getRiskProfile, getRiskLevel, getRiskProfiles, isValidRiskLevel } from "./services/risk-profile";
+import { LOGIN_HTML } from "./login";
 import type { Env } from "./types";
 
 const TICKER_REGEX = /^[A-Z]{1,5}$/;
@@ -41,11 +43,75 @@ app.use(
   })
 );
 
-// Bearer token auth — skip health check
+// ─── Login endpoint (must be before auth middleware) ───
+app.post("/api/login", async (c) => {
+  const body = await c.req.json<{ password?: string }>();
+  const correctPassword = c.env.APP_PASSWORD;
+  if (!correctPassword) return c.json({ ok: true });
+  if (!body.password || body.password !== correctPassword) {
+    return c.json({ error: "Hibás jelszó" }, 401);
+  }
+  const token = btoa(correctPassword + ":" + Date.now());
+  return c.json({ ok: true }, {
+    headers: {
+      "Set-Cookie": `auth=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000`,
+    },
+  });
+});
+
+// ─── Password auth middleware for ALL routes ───
+app.use("*", async (c, next) => {
+  const password = c.env.APP_PASSWORD;
+  if (!password) return next(); // no password = open access
+
+  // Allow login endpoint and health check
+  if (c.req.path === "/api/login") return next();
+  if (c.req.path === "/api/health") return next();
+  // Allow PWA manifest/sw
+  if (c.req.path === "/manifest.json") return next();
+  if (c.req.path === "/sw.js") return next();
+
+  // Check auth cookie
+  const cookie = c.req.header("Cookie") || "";
+  const authMatch = cookie.match(/auth=([^;]+)/);
+  if (authMatch) {
+    try {
+      const decoded = atob(authMatch[1]);
+      if (decoded.startsWith(password + ":")) return next();
+    } catch { /* invalid cookie */ }
+  }
+
+  // Check Bearer token (for API calls)
+  const bearer = c.req.header("Authorization")?.replace("Bearer ", "");
+  if (bearer === password) return next();
+
+  // If requesting HTML (dashboard), show login page
+  const accept = c.req.header("Accept") || "";
+  if (accept.includes("text/html") || c.req.path === "/") {
+    return c.html(LOGIN_HTML);
+  }
+
+  return c.json({ error: "Unauthorized" }, 401);
+});
+
+// Bearer token auth for API_SECRET — skip health check
 app.use("/api/*", async (c, next) => {
   if (c.req.path === "/api/health") return next();
+  if (c.req.path === "/api/login") return next();
   const secret = c.env.API_SECRET;
   if (!secret) return next(); // no secret configured = dev mode
+  // If already authenticated via APP_PASSWORD cookie, skip API_SECRET check
+  const password = c.env.APP_PASSWORD;
+  if (password) {
+    const cookie = c.req.header("Cookie") || "";
+    const authMatch = cookie.match(/auth=([^;]+)/);
+    if (authMatch) {
+      try {
+        const decoded = atob(authMatch[1]);
+        if (decoded.startsWith(password + ":")) return next();
+      } catch { /* fall through */ }
+    }
+  }
   const token = c.req.header("Authorization")?.replace("Bearer ", "");
   if (token !== secret) {
     return c.json({ error: "Unauthorized" }, 401);
@@ -338,6 +404,175 @@ app.get("/api/sectors", async (c) => {
   }
 });
 
+// Performance: portfolio vs SPY comparison (last 30 days)
+app.get("/api/performance", async (c) => {
+  const db = drizzle(c.env.DB);
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .split("T")[0];
+
+  const snapshots = await db
+    .select()
+    .from(dailySnapshots)
+    .where(gte(dailySnapshots.date, thirtyDaysAgo))
+    .orderBy(dailySnapshots.date);
+
+  if (snapshots.length < 2) {
+    return c.json({ portfolio: [], spy: [], excessReturn: 0 });
+  }
+
+  const firstValue = snapshots[0].totalValue;
+  const firstSpy = snapshots[0].spyPrice;
+
+  const portfolioData = snapshots.map((s) => ({
+    date: s.date,
+    value: s.totalValue,
+    returnPct: firstValue > 0
+      ? Math.round(((s.totalValue - firstValue) / firstValue) * 10000) / 100
+      : 0,
+  }));
+
+  const spyData = firstSpy
+    ? snapshots
+        .filter((s) => s.spyPrice != null)
+        .map((s) => ({
+          date: s.date,
+          price: s.spyPrice!,
+          returnPct: Math.round(((s.spyPrice! - firstSpy) / firstSpy) * 10000) / 100,
+        }))
+    : [];
+
+  const lastPortReturn = portfolioData[portfolioData.length - 1]?.returnPct ?? 0;
+  const lastSpyReturn = spyData[spyData.length - 1]?.returnPct ?? 0;
+  const excessReturn = Math.round((lastPortReturn - lastSpyReturn) * 100) / 100;
+
+  return c.json({ portfolio: portfolioData, spy: spyData, excessReturn });
+});
+
+// Macro indicators: VIX, 10Y Treasury, S&P 500
+app.get("/api/macro", async (c) => {
+  // Check KV cache first (15 min TTL)
+  const cached = await c.env.CACHE.get("macro_indicators");
+  if (cached) {
+    return c.json(safeParse(cached, null));
+  }
+
+  const finnhubKey = c.env.FINNHUB_API_KEY;
+
+  // Fetch VIX, TNX (10Y Treasury proxy), SPY in parallel
+  const [vixQuote, tnxQuote, spyQuote] = await Promise.all([
+    fetchQuote("VIX", c.env).catch(() => null),
+    fetchQuote("TNX", c.env).catch(() => null),
+    fetchQuote("SPY", c.env).catch(() => null),
+  ]);
+
+  // Compute SPY YTD return
+  let ytdReturn: number | null = null;
+  if (spyQuote) {
+    // Use Finnhub candle endpoint to get Jan 1 price
+    try {
+      const yearStart = new Date(new Date().getFullYear(), 0, 2);
+      const fromTs = Math.floor(yearStart.getTime() / 1000);
+      const toTs = Math.floor(yearStart.getTime() / 1000) + 86400 * 5; // first week of Jan
+      const res = await fetch(
+        `https://finnhub.io/api/v1/stock/candle?symbol=SPY&resolution=D&from=${fromTs}&to=${toTs}`,
+        { headers: { "X-Finnhub-Token": finnhubKey } }
+      );
+      if (res.ok) {
+        const data = (await res.json()) as { c?: number[]; s: string };
+        if (data.s !== "no_data" && data.c && data.c.length > 0) {
+          const janPrice = data.c[0];
+          ytdReturn = Math.round(((spyQuote.c - janPrice) / janPrice) * 10000) / 100;
+        }
+      }
+    } catch {
+      // Ignore YTD fetch errors
+    }
+  }
+
+  const result = {
+    vix: vixQuote
+      ? { value: Math.round(vixQuote.c * 100) / 100, change: Math.round(vixQuote.d * 100) / 100 }
+      : null,
+    treasury10y: tnxQuote
+      ? { value: Math.round(tnxQuote.c * 100) / 100, change: Math.round(tnxQuote.d * 100) / 100 }
+      : null,
+    sp500: spyQuote
+      ? {
+          value: Math.round(spyQuote.c * 100) / 100,
+          change: Math.round(spyQuote.d * 100) / 100,
+          changePct: Math.round(spyQuote.dp * 100) / 100,
+          ytdReturn,
+        }
+      : null,
+  };
+
+  // Cache for 15 min
+  await c.env.CACHE.put("macro_indicators", JSON.stringify(result), {
+    expirationTtl: 900,
+  });
+
+  return c.json(result);
+});
+
+// Earnings calendar for held positions
+app.get("/api/earnings", async (c) => {
+  const db = drizzle(c.env.DB);
+  const today = new Date().toISOString().split("T")[0];
+
+  // Get current portfolio tickers
+  const positions = await db
+    .select({ ticker: portfolio.ticker })
+    .from(portfolio)
+    .where(eq(portfolio.status, "open"));
+
+  if (positions.length === 0) {
+    return c.json({ earnings: [] });
+  }
+
+  const tickers = positions.map((p) => p.ticker);
+  const results: Array<{
+    ticker: string;
+    reportDate: string;
+    daysUntil: number;
+    estimateEps: number | null;
+  }> = [];
+
+  for (const ticker of tickers) {
+    const upcoming = await db
+      .select()
+      .from(earningsCalendar)
+      .where(
+        and(
+          eq(earningsCalendar.ticker, ticker),
+          eq(earningsCalendar.status, "upcoming"),
+          gte(earningsCalendar.reportDate, today)
+        )
+      )
+      .orderBy(earningsCalendar.reportDate)
+      .limit(1);
+
+    if (upcoming.length > 0) {
+      const earningsDate = new Date(upcoming[0].reportDate);
+      const now = new Date();
+      const daysUntil = Math.ceil(
+        (earningsDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)
+      );
+      results.push({
+        ticker: upcoming[0].ticker,
+        reportDate: upcoming[0].reportDate,
+        daysUntil,
+        estimateEps: upcoming[0].estimateEps,
+      });
+    }
+  }
+
+  // Sort by nearest first
+  results.sort((a, b) => a.daysUntil - b.daysUntil);
+
+  return c.json({ earnings: results });
+});
+
 // Manual trigger endpoints (bypass cron limits)
 app.post("/api/trigger/prices", async (c) => {
   try {
@@ -364,6 +599,25 @@ app.post("/api/trigger/analysis", async (c) => {
   } catch (e) {
     return c.json({ ok: false, error: String(e) }, 500);
   }
+});
+
+// ─── Settings endpoints ───
+
+app.get("/api/settings", async (c) => {
+  const level = await getRiskLevel(c.env);
+  const config = await getRiskProfile(c.env);
+  const profiles = getRiskProfiles();
+  return c.json({ riskLevel: level, riskConfig: config, profiles });
+});
+
+app.post("/api/settings/risk-profile", async (c) => {
+  const body = await c.req.json<{ level?: string }>();
+  if (!body.level || !isValidRiskLevel(body.level)) {
+    return c.json({ error: "Invalid risk level. Must be: conservative, balanced, aggressive" }, 400);
+  }
+  await c.env.CACHE.put("setting:risk_profile", body.level);
+  const config = getRiskProfiles()[body.level];
+  return c.json({ ok: true, riskLevel: body.level, riskConfig: config });
 });
 
 // Cron trigger handler

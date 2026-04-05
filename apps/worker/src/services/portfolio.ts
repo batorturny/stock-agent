@@ -70,9 +70,57 @@ async function getTrailingStop(ticker: string, env: Env): Promise<number | null>
   return JSON.parse(val) as number;
 }
 
+async function setTrailingStop(ticker: string, stopPrice: number, env: Env): Promise<void> {
+  await env.CACHE.put(
+    `trailing_stop:${ticker}`,
+    JSON.stringify(stopPrice),
+    { expirationTtl: 86400 * 90 }
+  );
+}
+
 async function clearTakeProfitState(ticker: string, env: Env): Promise<void> {
   await env.CACHE.delete(`${TP_KEY_PREFIX}${ticker}`);
   await env.CACHE.delete(`trailing_stop:${ticker}`);
+}
+
+/**
+ * Dynamic graduated trailing stop:
+ * - After +5%: move stop to break-even (entry price)
+ * - After +8%: move stop to +3%
+ * - After +10%: move stop to +5%
+ * The stop only moves UP, never down.
+ */
+async function updateDynamicTrailingStop(
+  ticker: string,
+  avgPrice: number,
+  currentPrice: number,
+  env: Env
+): Promise<void> {
+  const pnlPct = (currentPrice - avgPrice) / avgPrice;
+  const currentStop = await getTrailingStop(ticker, env);
+
+  let newStop: number | null = null;
+
+  if (pnlPct >= 0.10) {
+    // +10% gain: stop at +5% above entry
+    newStop = Math.round(avgPrice * 1.05 * 100) / 100;
+  } else if (pnlPct >= 0.08) {
+    // +8% gain: stop at +3% above entry
+    newStop = Math.round(avgPrice * 1.03 * 100) / 100;
+  } else if (pnlPct >= 0.05) {
+    // +5% gain: stop at break-even
+    newStop = avgPrice;
+  }
+
+  if (newStop !== null) {
+    // Only move stop UP, never down
+    if (currentStop === null || newStop > currentStop) {
+      await setTrailingStop(ticker, newStop, env);
+      console.log(
+        `[portfolio] Dynamic trailing stop: ${ticker} stop moved to $${newStop.toFixed(2)} (pnl: ${(pnlPct * 100).toFixed(1)}%)`
+      );
+    }
+  }
 }
 
 // ─── Account State ───
@@ -466,26 +514,29 @@ export async function checkStopLossAndTakeProfit(env: Env): Promise<string[]> {
       continue;
     }
 
-    // ── Trailing stop after take-profit ──
-    if (tpTriggered) {
-      const trailingStop = await getTrailingStop(pos.ticker, env);
-      if (trailingStop && cached.price <= trailingStop) {
-        const result = await executeTrade(
-          {
-            action: "sell",
-            ticker: pos.ticker,
-            shares: pos.shares,
-            reason: `Trailing stop hit at $${cached.price.toFixed(2)} (stop: $${trailingStop.toFixed(2)})`,
-          },
-          env,
-          "trailing_stop"
-        );
-        if (result.success) {
-          await db.update(portfolio).set({ closeReason: "stop_loss" }).where(eq(portfolio.id, pos.id));
-          actions.push(`TRAILING-STOP: ${pos.ticker} sold at $${cached.price.toFixed(2)}`);
-        }
-        continue;
+    // ── Dynamic graduated trailing stop (independent of take-profit) ──
+    // Updates trailing stop based on current gain level
+    await updateDynamicTrailingStop(pos.ticker, pos.avgPrice, cached.price, env);
+
+    // ── Check trailing stop (fires for both take-profit and dynamic trailing) ──
+    const trailingStop = await getTrailingStop(pos.ticker, env);
+    if (trailingStop && cached.price <= trailingStop) {
+      const stopSource = tpTriggered ? "take-profit trailing" : "dynamic trailing";
+      const result = await executeTrade(
+        {
+          action: "sell",
+          ticker: pos.ticker,
+          shares: pos.shares,
+          reason: `${stopSource} stop hit at $${cached.price.toFixed(2)} (stop: $${trailingStop.toFixed(2)})`,
+        },
+        env,
+        "trailing_stop"
+      );
+      if (result.success) {
+        await db.update(portfolio).set({ closeReason: "stop_loss" }).where(eq(portfolio.id, pos.id));
+        actions.push(`TRAILING-STOP: ${pos.ticker} sold at $${cached.price.toFixed(2)} (${stopSource} stop: $${trailingStop.toFixed(2)})`);
       }
+      continue;
     }
 
     // ── Stop-loss: -5% — ALWAYS fires regardless of hold period ──

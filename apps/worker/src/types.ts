@@ -5,6 +5,8 @@ export type Env = {
   FINNHUB_API_KEY: string;
   ENVIRONMENT: string;
   API_SECRET?: string;
+  APP_PASSWORD?: string;
+  RISK_PROFILE?: string;
   DASHBOARD_ORIGIN?: string;
   ALERT_WEBHOOK?: string;
 };

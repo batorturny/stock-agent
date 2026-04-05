@@ -15,6 +15,7 @@ import {
 } from "../services/risk-manager";
 import { sendAlert, HU_ALERTS } from "../services/alerter";
 import { buildCompanyContext, getCachedSectorPerformance, getCachedWatchlist } from "../services/stock-screener";
+import { getRiskProfile } from "../services/risk-profile";
 import type { Env, BuyPick } from "../types";
 import { PORTFOLIO_RULES } from "../types";
 
@@ -262,6 +263,36 @@ LEARN FROM YOUR MISTAKES: If accuracy is below 50%, be MORE conservative. If a s
     }
   }
 
+  // 4i. Fetch VIX for volatility-adaptive trading
+  const vixCached = await getCachedPrice("VIX", env) || await getCachedPrice("UVXY", env);
+  const vix = vixCached?.price || 20;
+  let vixOverride = "";
+  if (vix > 30) {
+    vixOverride = "\n\n⚠️ VIX IS ABOVE 30 — EXTREME FEAR IN THE MARKET.\n" +
+      "- Reduce position sizes by 50%\n" +
+      "- Only buy stocks with beta < 1.0\n" +
+      "- Increase cash target to 30%\n" +
+      "- Focus on defensive sectors: Healthcare, Utilities, Consumer Staples\n";
+  } else if (vix > 25) {
+    vixOverride = "\n\n⚠️ VIX IS ELEVATED (25+) — HEIGHTENED VOLATILITY.\n" +
+      "- Be more selective, raise confidence threshold to 0.70\n" +
+      "- Avoid small-cap and high-beta stocks\n";
+  } else if (vix < 15) {
+    vixOverride = "\n\n✅ VIX IS LOW (<15) — CALM MARKET.\n" +
+      "- Good conditions for new positions\n" +
+      "- Consider adding growth/momentum stocks\n";
+  }
+  console.log(`[daily-analysis] VIX: ${vix} | Override: ${vixOverride ? "YES" : "NONE"}`);
+
+  // 4j. Load risk profile for parameter overrides
+  const riskConfig = await getRiskProfile(env);
+  const riskOverride = `\n\n### RISK PROFILE: ${riskConfig.label} (${riskConfig.labelHu})\n` +
+    `- Stop-loss: ${(riskConfig.stopLossPct * 100).toFixed(0)}% | Take-profit: ${(riskConfig.takeProfitPct * 100).toFixed(0)}%\n` +
+    `- Max cash: ${(riskConfig.maxCashPct * 100).toFixed(0)}% | Min cash reserve: ${(riskConfig.minCashReservePct * 100).toFixed(0)}%\n` +
+    `- Max single position: ${(riskConfig.maxSinglePositionPct * 100).toFixed(0)}% | Max positions: ${riskConfig.maxPositions}\n` +
+    `- Min confidence for buy: ${(riskConfig.minConfidence * 100).toFixed(0)}% | Min hold: ${riskConfig.minHoldHours}h\n` +
+    `RESPECT THESE LIMITS in your portfolio actions.\n`;
+
   // 5. Run AI analysis with enriched data (sector + company context + AI history + plans injected)
   console.log("[daily-analysis] Running AI analysis...");
   const enrichedPriceHistory =
@@ -269,7 +300,9 @@ LEARN FROM YOUR MISTAKES: If accuracy is below 50%, be MORE conservative. If a s
     technicalIndicators +
     earningsWarning +
     (sectorContext ? "\n\n### Sector Performance (ETF-based)\n" + sectorContext : "") +
-    (companyContext ? "\n\n### Company Profiles & Insider Activity\n" + companyContext : "");
+    (companyContext ? "\n\n### Company Profiles & Insider Activity\n" + companyContext : "") +
+    vixOverride +
+    riskOverride;
 
   const rawResult = await runDailyAnalysis(
     portfolioState,

@@ -106,9 +106,9 @@ export const PORTFOLIO_RULES = {
   MAX_SECTOR_PCT: 0.4, // 40% max per sector
   STOP_LOSS_PCT: -0.05, // -5% stop loss (tight)
   TAKE_PROFIT_PCT: 0.12, // +12% take profit (sell half, trail remainder)
-  MIN_CONFIDENCE: 0.7, // 70%
+  MIN_CONFIDENCE: 0.55, // 55% — lower bar, idle cash is worse
   MIN_CASH_RESERVE_PCT: 0.05, // 5% min cash (aggressive)
-  MAX_CASH_PCT: 0.15, // 15% max cash — auto-invest above this
+  MAX_CASH_PCT: 0.10, // 10% max cash — auto-invest above this
   NEWS_SELL_IMPACT_THRESHOLD: 6, // impact > 6 triggers reactive sell
   NEWS_SELL_SENTIMENT_THRESHOLD: -0.3, // sentiment < -0.3 triggers reactive sell
   CIRCUIT_BREAKER_PCT: 0.15, // 15% single-day drop triggers circuit breaker

@@ -1,4 +1,4 @@
-import type { Env, DailyAnalysis, SentimentResult } from "../types";
+import type { Env, DailyAnalysis, SentimentResult, InvestmentPlanResult } from "../types";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 const MODEL = "gemini-2.0-flash";
@@ -109,6 +109,15 @@ If a sector ETF is underperforming (<-1% today), AVOID new buys in that sector a
 ### Portfolio
 {portfolio_state}
 
+### Active Investment Plans
+{investment_plans}
+
+RESPECT THESE PLANS. Only sell if:
+1. Stop-loss is hit (-5%)
+2. The original thesis is BROKEN by new evidence
+3. The target price is reached
+DO NOT sell just because you found something "better" — patience is profitable.
+
 ### Sector Performance (ETF-based)
 {sector_performance}
 
@@ -123,6 +132,8 @@ If a sector ETF is underperforming (<-1% today), AVOID new buys in that sector a
 
 ### Price History (30 days)
 {price_history}
+
+{ai_history}
 
 ---
 
@@ -243,15 +254,19 @@ export async function runDailyAnalysis(
   priceHistory: string,
   sectorPerformance: string,
   companyContext: string,
-  env: Env
+  env: Env,
+  aiHistory: string = "",
+  investmentPlans: string = ""
 ): Promise<DailyAnalysis> {
   const prompt = DAILY_ANALYSIS_PROMPT
     .replace("{portfolio_state}", portfolioState)
+    .replace("{investment_plans}", investmentPlans || "No active investment plans.")
     .replace("{sector_performance}", sectorPerformance || "No sector data available")
     .replace("{company_context}", companyContext || "No company profile data available")
     .replace("{recent_news}", recentNews)
     .replace("{news_trends}", newsTrends)
-    .replace("{price_history}", priceHistory);
+    .replace("{price_history}", priceHistory)
+    .replace("{ai_history}", aiHistory || "No historical performance data yet.");
 
   const text = await callGemini(prompt, env, 6144);
   const json = extractJson(text);
@@ -490,4 +505,183 @@ function validateDailyAnalysis(raw: unknown): DailyAnalysis {
         )
       : [],
   };
+}
+
+// ---------------------------------------------------------------------------
+// Double-Check Analysis — Risk Officer Review
+// ---------------------------------------------------------------------------
+
+export async function doubleCheckAnalysis(
+  originalAnalysis: DailyAnalysis,
+  portfolioState: string,
+  env: Env
+): Promise<DailyAnalysis> {
+  const prompt = `You are a RISK OFFICER reviewing a fund manager's proposed trades.
+Your job is to REJECT bad trades and APPROVE good ones. Be skeptical but not paralyzed.
+
+## Portfolio State
+${portfolioState}
+
+## Proposed Trades
+### Buy Picks (${originalAnalysis.buyPicks.length}):
+${originalAnalysis.buyPicks.map((p) => `- ${p.ticker} @ $${p.currentPrice} → target $${p.targetPrice} (stop $${p.stopLoss}), confidence ${(p.confidence * 100).toFixed(0)}%, reasoning: ${p.reasoning}`).join("\n")}
+
+### Sell Warnings (${originalAnalysis.sellWarnings.length}):
+${originalAnalysis.sellWarnings.map((w) => `- ${w.ticker}: ${w.reason} (urgency: ${w.urgency})`).join("\n")}
+
+### Portfolio Actions (${originalAnalysis.portfolioActions.length}):
+${originalAnalysis.portfolioActions.map((a) => `- ${a.action} ${a.shares} ${a.ticker}: ${a.reason}`).join("\n")}
+
+### Fund Manager Reasoning
+${originalAnalysis.reasoning}
+
+### Market Outlook: ${originalAnalysis.marketOutlook}
+### Risk Level: ${originalAnalysis.riskLevel}
+
+## YOUR REVIEW CRITERIA — REJECT any trade that:
+- Has weak reasoning (vague catalysts, no specific news reference)
+- Doesn't match the news evidence provided
+- Would create excessive sector concentration (>3 picks from same sector)
+- Has unrealistic target prices (>30% upside in <2 weeks without major catalyst)
+- Has a risk/reward ratio below 1.2
+- Would create excessive portfolio concentration (>25% in one stock)
+
+## INSTRUCTIONS
+Return the APPROVED trades only, in the exact same JSON format as the original analysis.
+You may adjust confidence scores downward if you see risks the fund manager missed.
+You may adjust share counts if position sizing is too aggressive.
+Keep all sell warnings — sells are safety-first.
+Preserve the original reasoning but append your review notes.
+
+Respond ONLY with valid JSON in the same format as the input (reasoning, buyPicks, sellWarnings, portfolioActions, marketOutlook, riskLevel, keyNarratives, watchlistAdditions).`;
+
+  try {
+    const text = await callGemini(prompt, env, 6144);
+    const json = extractJson(text);
+    const parsed = JSON.parse(json);
+    const reviewed = validateDailyAnalysis(parsed);
+
+    // Always keep original sell warnings — risk officer can only add, not remove sells
+    const mergedSellWarnings = [
+      ...originalAnalysis.sellWarnings,
+      ...reviewed.sellWarnings.filter(
+        (rw) => !originalAnalysis.sellWarnings.some((ow) => ow.ticker === rw.ticker)
+      ),
+    ];
+
+    return {
+      ...reviewed,
+      sellWarnings: mergedSellWarnings,
+      reasoning: `[DOUBLE-CHECKED] ${reviewed.reasoning}`,
+    };
+  } catch (err) {
+    console.error("[double-check] Risk review failed, using original analysis:", err);
+    return originalAnalysis;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Investment Plan Generator
+// ---------------------------------------------------------------------------
+
+export async function generateInvestmentPlan(
+  ticker: string,
+  buyReasoning: string,
+  currentPrice: number,
+  targetPrice: number,
+  env: Env
+): Promise<InvestmentPlanResult> {
+  const prompt = `You are a portfolio strategist creating an investment plan for a new position.
+
+## Position Details
+- Ticker: ${ticker}
+- Entry Price: $${currentPrice.toFixed(2)}
+- AI Target Price: $${targetPrice.toFixed(2)}
+- Buy Reasoning: ${buyReasoning}
+
+## INSTRUCTIONS
+Create a structured investment plan:
+1. Is this a PRICE-TARGET play (sell when hits $X) or TIME-BASED (hold for X months)?
+   - Price target: when there's a specific catalyst with a clear price ceiling
+   - Time-based: when the thesis needs time to play out (earnings cycles, sector rotation, macro trends)
+2. If price target: what's the realistic target and why? Must be achievable within 6 months.
+3. If time-based: what's the expected hold duration? Choose 1-6 months.
+4. Write a 2-sentence thesis explaining the investment rationale.
+5. Should we check price realtime (every 15min) or weekly?
+   - Realtime: for price-target plays with near-term catalysts
+   - Weekly: for time-based holds where short-term fluctuations don't matter
+
+THINK LONG TERM — prefer 2-6 month horizons unless there's a specific near-term catalyst.
+
+Respond ONLY with valid JSON:
+{
+  "targetType": "price" or "time",
+  "targetPrice": 210.00,
+  "targetDate": "2026-10-01",
+  "plannedHoldMonths": 3,
+  "thesis": "Two sentence thesis explaining the investment.",
+  "checkFrequency": "realtime" or "weekly"
+}
+
+RULES:
+- targetPrice is required if targetType is "price", optional otherwise
+- targetDate is required if targetType is "time" (ISO date format YYYY-MM-DD), optional otherwise
+- plannedHoldMonths must be 1-6
+- thesis must be 1-3 sentences, concise and specific`;
+
+  try {
+    const text = await callGemini(prompt, env, 1024);
+    const json = extractJson(text);
+    const parsed = JSON.parse(json) as Record<string, unknown>;
+
+    const targetType =
+      parsed.targetType === "time" ? "time" : "price";
+
+    const plannedHoldMonths =
+      typeof parsed.plannedHoldMonths === "number"
+        ? Math.max(1, Math.min(6, Math.round(parsed.plannedHoldMonths)))
+        : 3;
+
+    const thesis =
+      typeof parsed.thesis === "string" && parsed.thesis.length > 0
+        ? parsed.thesis
+        : `Investment in ${ticker} at $${currentPrice.toFixed(2)} targeting $${targetPrice.toFixed(2)}.`;
+
+    const checkFrequency: "realtime" | "weekly" =
+      parsed.checkFrequency === "realtime" ? "realtime" : "weekly";
+
+    const result: InvestmentPlanResult = {
+      targetType,
+      plannedHoldMonths,
+      thesis,
+      checkFrequency,
+    };
+
+    if (targetType === "price") {
+      result.targetPrice =
+        typeof parsed.targetPrice === "number" && parsed.targetPrice > currentPrice
+          ? parsed.targetPrice
+          : targetPrice;
+    }
+
+    if (targetType === "time" && typeof parsed.targetDate === "string") {
+      result.targetDate = parsed.targetDate;
+    } else if (targetType === "time") {
+      // Default: current date + plannedHoldMonths
+      const targetDate = new Date();
+      targetDate.setMonth(targetDate.getMonth() + plannedHoldMonths);
+      result.targetDate = targetDate.toISOString().split("T")[0];
+    }
+
+    return result;
+  } catch (err) {
+    console.error("[investment-plan] Plan generation failed, using defaults:", err);
+    return {
+      targetType: "price",
+      targetPrice,
+      plannedHoldMonths: 3,
+      thesis: `Investment in ${ticker} at $${currentPrice.toFixed(2)} targeting $${targetPrice.toFixed(2)}.`,
+      checkFrequency: "weekly",
+    };
+  }
 }

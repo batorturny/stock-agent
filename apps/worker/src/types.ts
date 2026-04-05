@@ -91,6 +91,15 @@ export type NewsItem = {
   scrapedAt: string;
 };
 
+export type InvestmentPlanResult = {
+  targetType: "price" | "time";
+  targetPrice?: number;
+  targetDate?: string;
+  plannedHoldMonths: number;
+  thesis: string;
+  checkFrequency: "realtime" | "weekly";
+};
+
 // RSS feed source configuration
 export type FeedSource = {
   name: string;
@@ -111,6 +120,7 @@ export const PORTFOLIO_RULES = {
   MAX_CASH_PCT: 0.10, // 10% max cash — auto-invest above this
   NEWS_SELL_IMPACT_THRESHOLD: 6, // impact > 6 triggers reactive sell
   NEWS_SELL_SENTIMENT_THRESHOLD: -0.3, // sentiment < -0.3 triggers reactive sell
+  MIN_HOLD_HOURS: 72, // 3-day minimum hold period (stop-loss always overrides)
   CIRCUIT_BREAKER_PCT: 0.15, // 15% single-day drop triggers circuit breaker
   MAX_DRAWDOWN_HALT_PCT: 0.15, // 15% drawdown from peak halts new buys
   SLIPPAGE_PCT: 0.0005, // 0.05% slippage simulation

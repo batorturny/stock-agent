@@ -85,6 +85,17 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
 .dot-pulse:nth-child(3){animation-delay:.4s}
 @keyframes pulse{0%,80%,100%{opacity:.3}40%{opacity:1}}
 
+/* Alerts */
+.alert-item{padding:.5rem .75rem;margin-bottom:.4rem;border-radius:8px;font-size:.8rem;line-height:1.4;border-left:4px solid var(--gray);background:var(--gray-light);transition:background .3s}
+.alert-item.alert-critical{border-left-color:var(--red);background:var(--warn-bg)}
+.alert-item.alert-warning{border-left-color:#f59e0b;background:#fefce8}
+.alert-item.alert-info{border-left-color:var(--green);background:#f0fdf4}
+.alert-time{font-size:.65rem;color:var(--gray);margin-top:.15rem}
+@media(prefers-color-scheme:dark){
+  .alert-item.alert-warning{background:#422006}
+  .alert-item.alert-info{background:#052e16}
+}
+
 /* Chart */
 .chart-card{background:var(--card-bg);border-radius:12px;padding:1.25rem;border:1px solid var(--card-border);box-shadow:0 1px 3px var(--card-shadow);margin-bottom:1.25rem;transition:background .3s}
 .chart-card .card-title{font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--gray);margin-bottom:.5rem;font-weight:600}
@@ -223,6 +234,15 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
 <div class="container">
   <div class="disclaimer">
     ⚠️ Ez egy szimulációs rendszer — kizárólag oktatási célokat szolgál. NEM pénzügyi tanácsadás. Virtuális portfólió, valós pénz nincs benne.
+  </div>
+
+  <!-- Alerts Panel -->
+  <div class="card" id="alerts-panel" style="margin-bottom:1.25rem;display:none">
+    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleAlerts()">
+      <span>🔔 Értesítések</span>
+      <span id="alerts-toggle" style="font-size:.75rem;color:var(--blue)">▼ Mind</span>
+    </div>
+    <div id="alerts-list"></div>
   </div>
 
   <!-- Portfolio Value Chart -->
@@ -791,12 +811,44 @@ refresh = async function() {
   checkNewTrades();
 };
 
+// === Alerts Panel ===
+let alertsExpanded = false;
+function toggleAlerts() {
+  alertsExpanded = !alertsExpanded;
+  renderAlerts();
+}
+
+async function loadAlerts() {
+  const data = await load('/alerts');
+  if (!data || !Array.isArray(data) || data.length === 0) {
+    $('alerts-panel').style.display = 'none';
+    return;
+  }
+  $('alerts-panel').style.display = 'block';
+  window._alertsData = data;
+  renderAlerts();
+}
+
+function renderAlerts() {
+  const data = window._alertsData;
+  if (!data || data.length === 0) return;
+  const items = alertsExpanded ? data.slice(0, 10) : data.slice(0, 3);
+  $('alerts-toggle').textContent = alertsExpanded ? '▲ Kevesebb' : '▼ Mind (' + Math.min(data.length, 10) + ')';
+  $('alerts-list').innerHTML = items.map(function(a) {
+    const lvl = a.level === 'critical' ? 'alert-critical' : a.level === 'warning' ? 'alert-warning' : 'alert-info';
+    return '<div class="alert-item ' + lvl + '"><div>' + a.message + '</div><div class="alert-time">' + fmtDate(a.timestamp) + '</div></div>';
+  }).join('');
+}
+
 refresh();
+loadAlerts();
 // Auto-refresh display every 60s, auto-trigger data fetch every 15 min
 setInterval(refresh, 60000);
 setInterval(triggerAll, 15 * 60000);
 // Update refresh timer every 30s
 setInterval(updateRefreshTimer, 30000);
+// Refresh alerts every 60s
+setInterval(loadAlerts, 60000);
 </script>
 </body>
 </html>`;

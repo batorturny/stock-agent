@@ -134,3 +134,25 @@ export const earningsCalendar = sqliteTable("earnings_calendar", {
   status: text("status", { enum: ["upcoming", "reported"] }).default("upcoming"),
   updatedAt: text("updated_at").notNull(),
 });
+
+export const investmentPlans = sqliteTable("investment_plans", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  ticker: text("ticker").notNull(),
+  entryPrice: real("entry_price").notNull(),
+  targetType: text("target_type", { enum: ["price", "time"] }).notNull(),
+  targetPrice: real("target_price"),
+  targetDate: text("target_date"),
+  plannedHoldMonths: integer("planned_hold_months"),
+  thesis: text("thesis").notNull(),
+  sector: text("sector"),
+  checkFrequency: text("check_frequency", { enum: ["realtime", "weekly"] })
+    .notNull()
+    .default("weekly"),
+  status: text("status", { enum: ["active", "completed", "abandoned"] })
+    .notNull()
+    .default("active"),
+  aiConviction: text("ai_conviction"),
+  lastReviewed: text("last_reviewed"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});

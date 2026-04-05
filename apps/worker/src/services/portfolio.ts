@@ -11,7 +11,19 @@ import {
   checkDrawdownHalt,
   checkEarningsProximity,
 } from "./risk-manager";
-import { sendAlert } from "./alerter";
+import { sendAlert, HU_ALERTS } from "./alerter";
+
+// ─── Hold period helper ───
+
+function getHoursHeld(boughtAt: string): number {
+  const bought = new Date(boughtAt).getTime();
+  const now = Date.now();
+  return (now - bought) / (1000 * 60 * 60);
+}
+
+function isWithinHoldPeriod(boughtAt: string): boolean {
+  return getHoursHeld(boughtAt) < PORTFOLIO_RULES.MIN_HOLD_HOURS;
+}
 
 // ─── Trade lock (KV-based mutex) ───
 
@@ -183,19 +195,19 @@ async function executeTradeInner(
     // ── Risk checks before any buy ──
     const drawdownCheck = await checkDrawdownHalt(env);
     if (drawdownCheck.halted) {
-      await sendAlert(`BUY blocked for ${action.ticker}: drawdown halt at ${drawdownCheck.drawdownPct}%`, "warning", env);
+      await sendAlert(HU_ALERTS.drawdownHalt(drawdownCheck.drawdownPct.toFixed(1)), "warning", env);
       return { success: false, reason: `Drawdown halt: portfolio down ${drawdownCheck.drawdownPct}%` };
     }
 
     const circuitCheck = await checkCircuitBreaker(action.ticker, rawPrice, env);
     if (circuitCheck.triggered) {
-      await sendAlert(`BUY blocked for ${action.ticker}: ${circuitCheck.reason}`, "warning", env);
+      await sendAlert(HU_ALERTS.circuitBreaker(action.ticker, "N/A"), "warning", env);
       return { success: false, reason: circuitCheck.reason };
     }
 
     const earningsCheck = await checkEarningsProximity(action.ticker, env);
     if (earningsCheck.nearEarnings) {
-      await sendAlert(`BUY blocked for ${action.ticker}: earnings in ${earningsCheck.daysUntil} day(s)`, "info", env);
+      await sendAlert(`⚠️ VÉTEL blokkolva: ${action.ticker} — earnings ${earningsCheck.daysUntil} napon belül`, "info", env);
       return { success: false, reason: `Earnings in ${earningsCheck.daysUntil} day(s) — buying blocked` };
     }
 
@@ -280,6 +292,13 @@ async function executeTradeInner(
       executedAt: now,
     });
 
+    // Send Hungarian alert
+    await sendAlert(
+      HU_ALERTS.buy(action.shares, action.ticker, price.toFixed(2), action.reason.slice(0, 100)),
+      "info",
+      env
+    );
+
     console.log(`[portfolio] BUY ${action.shares} ${action.ticker} @ $${price.toFixed(2)} (slippage from $${rawPrice.toFixed(2)}) | cash: $${newCash.toFixed(2)} | trigger: ${triggerType}`);
 
     // NOTE: autoInvestExcessCash removed from here — it caused silent failures
@@ -302,6 +321,25 @@ async function executeTradeInner(
 
     if (!position) {
       return { success: false, reason: `No open position for ${action.ticker}` };
+    }
+
+    // ── Minimum hold period check for non-emergency sells ──
+    // Stop-loss, circuit breaker, and trailing stop ALWAYS execute regardless.
+    // News reactive sells only if impact > 7 during hold period.
+    const emergencyTriggers = new Set(["stop_loss", "circuit_breaker", "trailing_stop"]);
+    if (isWithinHoldPeriod(position.boughtAt) && !emergencyTriggers.has(triggerType)) {
+      // For news reactive sells during hold period, only allow if reason suggests very high impact
+      if (triggerType === "news_reactive") {
+        // Impact is encoded in the reason string; we rely on the caller (newsReactiveSell) to gate this
+        // If it reached here with news_reactive during hold period, it passed the impact > 7 check
+      } else {
+        const hoursLeft = PORTFOLIO_RULES.MIN_HOLD_HOURS - getHoursHeld(position.boughtAt);
+        await sendAlert(HU_ALERTS.holdPeriod(action.ticker, hoursLeft), "info", env);
+        return {
+          success: false,
+          reason: `Minimum hold period not reached (72h). ${Math.ceil(hoursLeft)}h remaining.`,
+        };
+      }
     }
 
     const sellShares = Math.min(action.shares, position.shares);
@@ -348,6 +386,13 @@ async function executeTradeInner(
       postCash: newCash,
       executedAt: now,
     });
+
+    // Send Hungarian alert
+    await sendAlert(
+      HU_ALERTS.sell(sellShares, action.ticker, price.toFixed(2), action.reason.slice(0, 100)),
+      "info",
+      env
+    );
 
     console.log(`[portfolio] SELL ${sellShares} ${action.ticker} @ $${price.toFixed(2)} (slippage from $${rawPrice.toFixed(2)}) | cash: $${newCash.toFixed(2)} | trigger: ${triggerType}`);
 
@@ -412,7 +457,11 @@ export async function checkStopLossAndTakeProfit(env: Env): Promise<string[]> {
       if (result.success) {
         await db.update(portfolio).set({ closeReason: "stop_loss" }).where(eq(portfolio.id, pos.id));
         actions.push(`CIRCUIT-BREAKER: ${pos.ticker} sold — ${circuitCheck.reason}`);
-        await sendAlert(`CIRCUIT BREAKER SELL: ${pos.ticker} @ $${cached.price.toFixed(2)} — ${circuitCheck.reason}`, "critical", env);
+        await sendAlert(
+          HU_ALERTS.circuitBreaker(pos.ticker, (cached.changePercent ?? 0).toFixed(1)),
+          "critical",
+          env
+        );
       }
       continue;
     }
@@ -434,13 +483,12 @@ export async function checkStopLossAndTakeProfit(env: Env): Promise<string[]> {
         if (result.success) {
           await db.update(portfolio).set({ closeReason: "stop_loss" }).where(eq(portfolio.id, pos.id));
           actions.push(`TRAILING-STOP: ${pos.ticker} sold at $${cached.price.toFixed(2)}`);
-          await sendAlert(`TRAILING STOP: ${pos.ticker} sold at $${cached.price.toFixed(2)} (stop: $${trailingStop.toFixed(2)})`, "warning", env);
         }
         continue;
       }
     }
 
-    // ── Stop-loss: -5% ──
+    // ── Stop-loss: -5% — ALWAYS fires regardless of hold period ──
     if (pnlPercent <= PORTFOLIO_RULES.STOP_LOSS_PCT) {
       const result = await executeTrade(
         {
@@ -455,13 +503,29 @@ export async function checkStopLossAndTakeProfit(env: Env): Promise<string[]> {
       if (result.success) {
         await db.update(portfolio).set({ closeReason: "stop_loss" }).where(eq(portfolio.id, pos.id));
         actions.push(`STOP-LOSS: ${pos.ticker} at ${(pnlPercent * 100).toFixed(1)}%`);
-        await sendAlert(`STOP-LOSS: ${pos.ticker} sold at ${(pnlPercent * 100).toFixed(1)}% loss`, "warning", env);
+        await sendAlert(
+          HU_ALERTS.stopLoss(pos.ticker, `${(pnlPercent * 100).toFixed(1)}%`),
+          "warning",
+          env
+        );
       }
       continue;
     }
 
     // ── Take-profit: +12% — sell 50%, move stop to break-even ──
+    // Skip take-profit if position is within minimum hold period
     if (!tpTriggered && pnlPercent >= PORTFOLIO_RULES.TAKE_PROFIT_PCT) {
+      if (isWithinHoldPeriod(pos.boughtAt)) {
+        const hoursLeft = PORTFOLIO_RULES.MIN_HOLD_HOURS - getHoursHeld(pos.boughtAt);
+        console.log(`[portfolio] TAKE-PROFIT skipped for ${pos.ticker}: within ${PORTFOLIO_RULES.MIN_HOLD_HOURS}h hold period (${Math.ceil(hoursLeft)}h left)`);
+        await sendAlert(
+          HU_ALERTS.holdPeriod(pos.ticker, hoursLeft),
+          "info",
+          env
+        );
+        continue;
+      }
+
       const halfShares = Math.floor(pos.shares / 2);
       if (halfShares > 0) {
         const result = await executeTrade(
@@ -477,7 +541,11 @@ export async function checkStopLossAndTakeProfit(env: Env): Promise<string[]> {
         if (result.success) {
           await setTakeProfitTriggered(pos.ticker, pos.avgPrice, env);
           actions.push(`TAKE-PROFIT: ${pos.ticker} half sold at ${(pnlPercent * 100).toFixed(1)}%, trailing at $${pos.avgPrice.toFixed(2)}`);
-          await sendAlert(`TAKE-PROFIT: ${pos.ticker} +${(pnlPercent * 100).toFixed(1)}% — sold 50%, trailing at $${pos.avgPrice.toFixed(2)}`, "info", env);
+          await sendAlert(
+            HU_ALERTS.takeProfit(pos.ticker, `${(pnlPercent * 100).toFixed(1)}%`),
+            "info",
+            env
+          );
         }
       }
     }
@@ -516,6 +584,21 @@ export async function newsReactiveSell(
     return { sold: false, reason: `No open position for ${ticker}` };
   }
 
+  // ── Hold period gate for news reactive sells ──
+  // During hold period, only sell if impact is very high (> 7)
+  if (isWithinHoldPeriod(position.boughtAt) && impact <= 7) {
+    const hoursLeft = PORTFOLIO_RULES.MIN_HOLD_HOURS - getHoursHeld(position.boughtAt);
+    await sendAlert(
+      `📰 ${ticker}: negatív hír (impact=${impact}) de tartási időn belül (${Math.ceil(hoursLeft)}h hátra). Csak impact > 7 esetén adunk el.`,
+      "info",
+      env
+    );
+    return {
+      sold: false,
+      reason: `Within hold period (${Math.ceil(hoursLeft)}h left). Impact ${impact} <= 7 threshold for hold-period override.`,
+    };
+  }
+
   console.log(`[portfolio] NEWS REACTIVE SELL: ${ticker} | sentiment=${sentiment} impact=${impact}`);
 
   const result = await executeTrade(
@@ -534,7 +617,11 @@ export async function newsReactiveSell(
       .update(portfolio)
       .set({ closeReason: "stop_loss" })
       .where(eq(portfolio.id, position.id));
-    await sendAlert(`NEWS REACTIVE SELL: ${ticker} — impact=${impact}, sentiment=${sentiment.toFixed(2)}`, "critical", env);
+    await sendAlert(
+      HU_ALERTS.sell(position.shares, ticker, "market", `Hír miatti eladás — impact=${impact}, sentiment=${sentiment.toFixed(2)}`),
+      "critical",
+      env
+    );
     return { sold: true, reason: result.reason };
   }
 
@@ -582,6 +669,11 @@ export async function rebalancePortfolio(env: Env): Promise<string[]> {
 
   if (cashPct > PORTFOLIO_RULES.MAX_CASH_PCT) {
     actions.push(`REBALANCE: Cash at ${(cashPct * 100).toFixed(1)}% — exceeds ${PORTFOLIO_RULES.MAX_CASH_PCT * 100}% max. Running auto-invest.`);
+    await sendAlert(
+      HU_ALERTS.highCash((cashPct * 100).toFixed(1)),
+      "warning",
+      env
+    );
     await autoInvestExcessCash(env);
   }
 

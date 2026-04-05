@@ -1,10 +1,10 @@
 import { eq, and, lte, gte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { portfolio, prices, pendingOrders } from "../db/schema";
+import { portfolio, prices, pendingOrders, investmentPlans } from "../db/schema";
 import { fetchQuotes, updatePriceCache, getCachedPrice } from "../services/price-api";
 import { checkStopLossAndTakeProfit, executeTrade, getAccountState } from "../services/portfolio";
 import { saveDailySnapshot } from "../services/risk-manager";
-import { sendAlert } from "../services/alerter";
+import { sendAlert, HU_ALERTS } from "../services/alerter";
 import { buildDynamicWatchlist, getCachedWatchlist } from "../services/stock-screener";
 import type { Env } from "../types";
 import { PORTFOLIO_RULES } from "../types";
@@ -86,6 +86,9 @@ export async function handlePriceFetch(env: Env): Promise<void> {
   // ── Check pending limit orders ──
   await checkPendingLimitOrders(env);
 
+  // ── Check realtime investment plans (price-target plans with realtime frequency) ──
+  await checkRealtimeInvestmentPlans(env);
+
   // ── Check pending rotations (immediate reinvest after sell) ──
   await checkPendingRotation(env, watchlist);
 }
@@ -153,7 +156,7 @@ async function checkPendingRotation(env: Env, watchlist: string[]): Promise<void
 
     if (result.success) {
       await sendAlert(
-        `ROTATION: Sold ${rotation.fromTicker} → Bought ${shares} ${ticker} @ $${cached.price.toFixed(2)}`,
+        HU_ALERTS.rotation(rotation.fromTicker, ticker, shares, cached.price.toFixed(2)),
         "info",
         env
       );
@@ -222,7 +225,7 @@ async function checkPendingLimitOrders(env: Env): Promise<void> {
           .where(eq(pendingOrders.id, order.id));
 
         await sendAlert(
-          `LIMIT ORDER FILLED: ${order.action.toUpperCase()} ${order.shares} ${order.ticker} @ $${currentPrice} (limit: $${order.limitPrice})`,
+          HU_ALERTS.limitOrderFilled(order.action, order.shares, order.ticker, currentPrice.toFixed(2)),
           "info",
           env
         );
@@ -250,5 +253,88 @@ async function checkPendingLimitOrders(env: Env): Promise<void> {
 
   if (expiredOrders.length > 0) {
     console.log(`[price-fetch] Expired ${expiredOrders.length} limit orders`);
+  }
+}
+
+/**
+ * Check realtime investment plans — plans with check_frequency = 'realtime'
+ * and target_type = 'price'. If target price is reached, execute sell and
+ * mark plan as completed.
+ */
+async function checkRealtimeInvestmentPlans(env: Env): Promise<void> {
+  const db = drizzle(env.DB);
+  const now = new Date().toISOString();
+
+  // Get active plans with realtime check frequency
+  const realtimePlans = await db
+    .select()
+    .from(investmentPlans)
+    .where(
+      and(
+        eq(investmentPlans.status, "active"),
+        eq(investmentPlans.checkFrequency, "realtime")
+      )
+    );
+
+  if (realtimePlans.length === 0) return;
+
+  console.log(`[price-fetch] Checking ${realtimePlans.length} realtime investment plans...`);
+
+  for (const plan of realtimePlans) {
+    if (plan.targetType !== "price" || !plan.targetPrice) continue;
+
+    const cached = await getCachedPrice(plan.ticker, env);
+    if (!cached) continue;
+
+    const currentPrice = cached.price;
+
+    if (currentPrice >= plan.targetPrice) {
+      console.log(
+        `[price-fetch] Plan target reached: ${plan.ticker} $${currentPrice.toFixed(2)} >= target $${plan.targetPrice}`
+      );
+
+      // Find open position to sell
+      const positions = await db
+        .select()
+        .from(portfolio)
+        .where(
+          and(
+            eq(portfolio.ticker, plan.ticker),
+            eq(portfolio.status, "open")
+          )
+        );
+
+      if (positions.length > 0) {
+        const pos = positions[0];
+        const result = await executeTrade(
+          {
+            action: "sell",
+            ticker: plan.ticker,
+            shares: pos.shares,
+            reason: `Investment plan target reached: $${currentPrice.toFixed(2)} >= $${plan.targetPrice} target`,
+          },
+          env,
+          "take_profit"
+        );
+
+        if (result.success) {
+          await db
+            .update(investmentPlans)
+            .set({
+              status: "completed",
+              aiConviction: `Target $${plan.targetPrice} reached at $${currentPrice.toFixed(2)}. P&L: ${(((currentPrice - plan.entryPrice) / plan.entryPrice) * 100).toFixed(1)}%`,
+              lastReviewed: now,
+              updatedAt: now,
+            })
+            .where(eq(investmentPlans.id, plan.id));
+
+          await sendAlert(
+            `PLAN COMPLETED: ${plan.ticker} hit target $${plan.targetPrice} (entry $${plan.entryPrice}, P&L ${(((currentPrice - plan.entryPrice) / plan.entryPrice) * 100).toFixed(1)}%)`,
+            "info",
+            env
+          );
+        }
+      }
+    }
   }
 }

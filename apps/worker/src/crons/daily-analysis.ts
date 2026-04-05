@@ -1,7 +1,7 @@
-import { desc, gte } from "drizzle-orm";
+import { desc, gte, not, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { news, prices, analysis, predictions } from "../db/schema";
-import { runDailyAnalysis } from "../services/ai-analyst";
+import { news, prices, analysis, predictions, trades, investmentPlans } from "../db/schema";
+import { runDailyAnalysis, doubleCheckAnalysis, generateInvestmentPlan } from "../services/ai-analyst";
 import { getAccountState, executeTrade, rebalancePortfolio, autoInvestExcessCash } from "../services/portfolio";
 import { getCachedPrice } from "../services/price-api";
 import {
@@ -13,10 +13,22 @@ import {
   computeSMA,
   computeMACD,
 } from "../services/risk-manager";
-import { sendAlert } from "../services/alerter";
+import { sendAlert, HU_ALERTS } from "../services/alerter";
 import { buildCompanyContext, getCachedSectorPerformance, getCachedWatchlist } from "../services/stock-screener";
-import type { Env } from "../types";
+import type { Env, BuyPick } from "../types";
 import { PORTFOLIO_RULES } from "../types";
+
+// ─── KV cache key for TA indicators ───
+const TA_CACHE_KEY_PREFIX = "ta_indicators:";
+const TA_CACHE_TTL = 3600; // 1 hour
+
+async function getCachedTA(ticker: string, env: Env): Promise<string | null> {
+  return env.CACHE.get(`${TA_CACHE_KEY_PREFIX}${ticker}`);
+}
+
+async function setCachedTA(ticker: string, data: string, env: Env): Promise<void> {
+  await env.CACHE.put(`${TA_CACHE_KEY_PREFIX}${ticker}`, data, { expirationTtl: TA_CACHE_TTL });
+}
 
 export async function handleDailyAnalysis(env: Env): Promise<void> {
   const db = drizzle(env.DB);
@@ -32,6 +44,32 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
   console.log(
     `[daily-analysis] Portfolio: $${accountState.totalValue.toFixed(2)} total, $${accountState.cash.toFixed(2)} cash (${(cashPct * 100).toFixed(1)}%), ${accountState.positions.length} positions`
   );
+
+  // ─── Gather AI performance history for self-learning ───
+  const pastAnalyses = await db.select().from(analysis)
+    .orderBy(desc(analysis.createdAt)).limit(5);
+
+  const allPredictions = await db.select().from(predictions)
+    .where(not(eq(predictions.outcome, "pending")));
+
+  const totalPredictions = allPredictions.length;
+  const hits = allPredictions.filter(p => p.outcome === "target_hit").length;
+  const misses = allPredictions.filter(p => p.outcome === "stop_hit").length;
+  const accuracy = totalPredictions > 0 ? (hits / totalPredictions * 100).toFixed(1) : "N/A";
+
+  const recentTrades = await db.select().from(trades)
+    .orderBy(desc(trades.executedAt)).limit(20);
+
+  const aiHistory = `
+### AI Performance History
+- Total predictions: ${totalPredictions} | Hits: ${hits} | Misses: ${misses} | Accuracy: ${accuracy}%
+- Recent trades: ${recentTrades.map(t => `${t.action} ${t.ticker} @ $${t.price} (${t.reason?.slice(0, 50) ?? "N/A"})`).join("; ")}
+- Past outlooks: ${pastAnalyses.map(a => a.outlook?.slice(0, 100) ?? "N/A").join(" | ")}
+
+LEARN FROM YOUR MISTAKES: If accuracy is below 50%, be MORE conservative. If a sector consistently loses money, AVOID it.
+`;
+
+  console.log(`[daily-analysis] AI history: ${totalPredictions} predictions, ${accuracy}% accuracy`);
 
   // 2. Get last 24h news
   const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
@@ -92,10 +130,10 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
     .map((p) => `${p.ticker}: $${p.price} @ ${p.recordedAt}`)
     .join("\n");
 
-  // 4b. Compute technical indicators for portfolio + dynamic watchlist tickers
+  // 4b. Compute technical indicators — only for portfolio tickers + top 5 watchlist picks
+  // (reduced from full watchlist to avoid hitting Workers subrequest limit)
   const portfolioTickers = accountState.positions.map((p) => p.ticker);
 
-  // Use dynamic watchlist instead of static list
   let watchlistTickers: string[];
   try {
     watchlistTickers = await getCachedWatchlist(env);
@@ -103,10 +141,18 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
     watchlistTickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "JPM", "AMD", "NFLX"];
   }
 
-  const allTickersForTA = [...new Set([...portfolioTickers, ...watchlistTickers.slice(0, 15)])];
+  // Only compute TA for portfolio + top 5 watchlist (not all 15+)
+  const allTickersForTA = [...new Set([...portfolioTickers, ...watchlistTickers.slice(0, 5)])];
 
   const technicalData: string[] = [];
   for (const ticker of allTickersForTA) {
+    // Check KV cache first (1 hour TTL)
+    const cached = await getCachedTA(ticker, env);
+    if (cached) {
+      technicalData.push(cached);
+      continue;
+    }
+
     const historicalPrices = await getHistoricalPrices(ticker, 60, env);
     if (historicalPrices.length < 15) continue;
 
@@ -127,6 +173,8 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
     if (rsi !== null && rsi < 30) line += " [OVERSOLD]";
 
     technicalData.push(line);
+    // Cache for 1 hour
+    await setCachedTA(ticker, line, env);
   }
 
   const technicalIndicators = technicalData.length > 0
@@ -148,10 +196,11 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
   const drawdownCheck = await checkDrawdownHalt(env);
   if (drawdownCheck.halted) {
     console.log(`[daily-analysis] DRAWDOWN HALT: portfolio down ${drawdownCheck.drawdownPct}% — skipping AI buy execution`);
-    await sendAlert(`DRAWDOWN HALT: portfolio down ${drawdownCheck.drawdownPct}% from peak — all buying paused`, "critical", env);
+    await sendAlert(HU_ALERTS.drawdownHalt(drawdownCheck.drawdownPct.toFixed(1)), "critical", env);
   }
 
   // 4f. Get sector performance and company context from stock screener
+  // Reduced company profile fetches from 10 to 5 watchlist tickers to stay under subrequest limit
   let sectorContext = "";
   let companyContext = "";
   try {
@@ -169,8 +218,9 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
   }
 
   try {
+    // Reduced from watchlistTickers.slice(0, 10) to slice(0, 5) to save subrequests
     const contextTickers = [
-      ...new Set([...watchlistTickers.slice(0, 10), ...portfolioTickers]),
+      ...new Set([...watchlistTickers.slice(0, 5), ...portfolioTickers]),
     ];
     companyContext = await buildCompanyContext(contextTickers, env);
     console.log(`[daily-analysis] Company context built for ${contextTickers.length} tickers`);
@@ -178,7 +228,41 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
     console.error("[daily-analysis] Company context build failed:", err);
   }
 
-  // 5. Run AI analysis with enriched data (sector + company context injected)
+  // 4g. Load active investment plans for AI context
+  const activePlans = await db
+    .select()
+    .from(investmentPlans)
+    .where(eq(investmentPlans.status, "active"));
+
+  const investmentPlansContext = activePlans.length > 0
+    ? activePlans.map((p) => {
+        if (p.targetType === "price") {
+          return `${p.ticker}: Entry $${p.entryPrice}, Target $${p.targetPrice} (price), Hold ${p.plannedHoldMonths} months. Thesis: "${p.thesis}"`;
+        }
+        return `${p.ticker}: Entry $${p.entryPrice}, Hold until ${p.targetDate} (time). Thesis: "${p.thesis}"`;
+      }).join("\n")
+    : "";
+
+  // 4h. Get yesterday's picks for dedup (prevent same picks every day)
+  const yesterdayStart = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+  const yesterdayAnalyses = await db
+    .select()
+    .from(analysis)
+    .where(gte(analysis.createdAt, yesterdayStart))
+    .orderBy(desc(analysis.createdAt))
+    .limit(1);
+
+  const yesterdayPickTickers = new Set<string>();
+  if (yesterdayAnalyses.length > 0) {
+    try {
+      const picks = JSON.parse(yesterdayAnalyses[0].picks) as BuyPick[];
+      for (const p of picks) yesterdayPickTickers.add(p.ticker);
+    } catch {
+      // Ignore parse errors
+    }
+  }
+
+  // 5. Run AI analysis with enriched data (sector + company context + AI history + plans injected)
   console.log("[daily-analysis] Running AI analysis...");
   const enrichedPriceHistory =
     (priceHistory || "No price history available") +
@@ -187,18 +271,27 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
     (sectorContext ? "\n\n### Sector Performance (ETF-based)\n" + sectorContext : "") +
     (companyContext ? "\n\n### Company Profiles & Insider Activity\n" + companyContext : "");
 
-  const result = await runDailyAnalysis(
+  const rawResult = await runDailyAnalysis(
     portfolioState,
     recentNews || "No recent news available",
     newsTrends || "No trend data available",
     enrichedPriceHistory,
     sectorContext,
     companyContext,
-    env
+    env,
+    aiHistory,
+    investmentPlansContext
   );
 
   console.log(
-    `[daily-analysis] AI result: ${result.buyPicks.length} buy picks, ${result.sellWarnings.length} sell warnings, outlook: ${result.marketOutlook}`
+    `[daily-analysis] Raw AI result: ${rawResult.buyPicks.length} buy picks, ${rawResult.sellWarnings.length} sell warnings`
+  );
+
+  // 5b. Double-check analysis with risk officer review
+  console.log("[daily-analysis] Running double-check risk review...");
+  const result = await doubleCheckAnalysis(rawResult, portfolioState, env);
+  console.log(
+    `[daily-analysis] After double-check: ${result.buyPicks.length} buy picks approved (was ${rawResult.buyPicks.length}), outlook: ${result.marketOutlook}`
   );
 
   // 6. Save analysis
@@ -239,18 +332,45 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
       console.log(`[daily-analysis] AI sell: ${action.ticker} — ${action.reason}`);
       const tradeResult = await executeTrade(action, env, "ai_pick");
       console.log(`[daily-analysis] Sell result: ${tradeResult.success ? "OK" : "FAIL"} — ${tradeResult.reason}`);
-      if (tradeResult.success) openTickers.delete(action.ticker);
+      if (tradeResult.success) {
+        openTickers.delete(action.ticker);
+        // Mark corresponding investment plan as abandoned if exists
+        const plan = activePlans.find((p) => p.ticker === action.ticker);
+        if (plan) {
+          await db.update(investmentPlans)
+            .set({ status: "abandoned", updatedAt: now.toISOString() })
+            .where(eq(investmentPlans.id, plan.id));
+          console.log(`[daily-analysis] Investment plan for ${action.ticker} marked as abandoned`);
+        }
+      }
     }
   }
 
-  // Execute buy picks — top confident picks (skip if drawdown halt)
+  // 7b. Execute buy picks — only if genuine new opportunity (dedup against yesterday)
+  // Conditions: cash > 10% AND pick is not the same as yesterday's (unless we don't hold it yet)
   if (drawdownCheck.halted) {
     console.log("[daily-analysis] Skipping all buys — drawdown halt active");
   }
+
+  const preBuyCashPct = currentState.cash / currentState.totalValue;
+  const hasEnoughCash = preBuyCashPct > PORTFOLIO_RULES.MAX_CASH_PCT;
+
+  if (!drawdownCheck.halted && !hasEnoughCash) {
+    console.log(`[daily-analysis] Cash at ${(preBuyCashPct * 100).toFixed(1)}% — below ${PORTFOLIO_RULES.MAX_CASH_PCT * 100}% threshold, skipping new buys`);
+  }
+
   for (const pick of result.buyPicks) {
     if (drawdownCheck.halted) break;
+    if (!hasEnoughCash) break;
     if (pick.confidence < PORTFOLIO_RULES.MIN_CONFIDENCE) continue;
     if (openTickers.has(pick.ticker)) continue;
+
+    // Dedup: skip if same ticker was picked yesterday and we already have enough positions
+    const isRepeatPick = yesterdayPickTickers.has(pick.ticker);
+    if (isRepeatPick && openTickers.size >= 6) {
+      console.log(`[daily-analysis] Skipping repeat pick ${pick.ticker} — same as yesterday, portfolio has ${openTickers.size} positions`);
+      continue;
+    }
 
     // Allocate ~15% of total value per position
     const allocAmount = currentState.totalValue * 0.15;
@@ -268,7 +388,42 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
       "ai_pick"
     );
     console.log(`[daily-analysis] Buy result: ${tradeResult.success ? "OK" : "FAIL"} — ${tradeResult.reason}`);
-    if (tradeResult.success) openTickers.add(pick.ticker);
+
+    if (tradeResult.success) {
+      openTickers.add(pick.ticker);
+
+      // Generate and save investment plan for this buy
+      try {
+        console.log(`[daily-analysis] Generating investment plan for ${pick.ticker}...`);
+        const plan = await generateInvestmentPlan(
+          pick.ticker,
+          pick.reasoning,
+          currentPrice,
+          pick.targetPrice,
+          env
+        );
+
+        await db.insert(investmentPlans).values({
+          ticker: pick.ticker,
+          entryPrice: currentPrice,
+          targetType: plan.targetType,
+          targetPrice: plan.targetPrice ?? null,
+          targetDate: plan.targetDate ?? null,
+          plannedHoldMonths: plan.plannedHoldMonths,
+          thesis: plan.thesis,
+          sector: null,
+          checkFrequency: plan.checkFrequency,
+          status: "active",
+          aiConviction: `Initial buy at $${currentPrice.toFixed(2)}, confidence ${(pick.confidence * 100).toFixed(0)}%`,
+          lastReviewed: now.toISOString(),
+          createdAt: now.toISOString(),
+          updatedAt: now.toISOString(),
+        });
+        console.log(`[daily-analysis] Investment plan saved: ${pick.ticker} ${plan.targetType} target, hold ${plan.plannedHoldMonths}mo`);
+      } catch (err) {
+        console.error(`[daily-analysis] Failed to save investment plan for ${pick.ticker}:`, err);
+      }
+    }
   }
 
   // 8. Ensure portfolio is at least 85% invested (skip if drawdown halt)

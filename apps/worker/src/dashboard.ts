@@ -12,6 +12,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 <meta name="apple-mobile-web-app-title" content="Stock Agent">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
+html,body{overflow-x:hidden;width:100%;max-width:100vw}
 :root{--blue:#3b82f6;--blue-light:#60a5fa;--blue-dark:#1d4ed8;--blue-bg:#eff6ff;--blue-50:#dbeafe;--green:#16a34a;--red:#dc2626;--gray:#64748b;--gray-light:#f1f5f9;--white:#ffffff;--dark:#0f172a;--card-bg:var(--white);--card-border:#e2e8f0;--card-shadow:rgba(0,0,0,.04);--body-bg:var(--blue-bg);--table-border:#f1f5f9;--header-bg:var(--white);--footer-bg:var(--white);--disclaimer-bg:#fef3c7;--disclaimer-border:#fde68a;--disclaimer-color:#92400e;--modal-bg:var(--white);--modal-shadow:rgba(0,0,0,.2);--warn-bg:#fef2f2;--warn-border:#fecaca;--hover-bg:#f8fafc}
 body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--body-bg);color:var(--dark);min-height:100vh;transition:background .3s,color .3s}
 .header{background:var(--header-bg);border-bottom:2px solid var(--blue);padding:1rem 1.5rem;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10;transition:background .3s}
@@ -27,12 +28,12 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px}
 .status-ok{background:var(--green)}.status-loading{background:#f59e0b;animation:pulse 1s infinite}
-.container{max-width:1200px;margin:0 auto;padding:1.5rem}
+.container{max-width:1200px;margin:0 auto;padding:1.5rem;overflow-x:hidden}
 .grid{display:grid;gap:1.25rem}
 .grid-4{grid-template-columns:repeat(4,1fr)}
 .grid-2{grid-template-columns:1fr 1fr}
 .grid-5{grid-template-columns:repeat(5,1fr)}
-.card{background:var(--card-bg);border-radius:12px;padding:1.25rem;border:1px solid var(--card-border);box-shadow:0 1px 3px var(--card-shadow);transition:transform .2s,box-shadow .2s,background .3s}
+.card{background:var(--card-bg);border-radius:12px;padding:1.25rem;border:1px solid var(--card-border);box-shadow:0 1px 3px var(--card-shadow);transition:transform .2s,box-shadow .2s,background .3s;overflow:hidden;word-break:break-word}
 .card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.08)}
 .card-title{font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--gray);margin-bottom:.75rem;font-weight:600}
 .stat-value{font-size:1.75rem;font-weight:700;transition:color .3s}
@@ -56,7 +57,7 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
 .badge-neg{background:#fee2e2;color:var(--red)}
 .badge-neutral{background:var(--gray-light);color:var(--gray)}
 .badge-blue{background:var(--blue-50);color:var(--blue)}
-.pick-card{border:1px solid var(--card-border);border-radius:10px;padding:1rem;margin-bottom:.75rem;transition:border-color .15s}
+.pick-card{border:1px solid var(--card-border);border-radius:10px;padding:1rem;margin-bottom:.75rem;transition:border-color .15s;overflow:hidden;word-break:break-word}
 .pick-card:hover{border-color:var(--blue-light)}
 .pick-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem}
 .pick-ticker{font-family:monospace;font-size:1.1rem;font-weight:700;color:var(--blue-dark)}

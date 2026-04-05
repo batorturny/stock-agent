@@ -193,14 +193,18 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
   for (const action of result.portfolioActions) {
     if (action.action === "sell" && openTickers.has(action.ticker)) {
       console.log(`[daily-analysis] AI sell: ${action.ticker} — ${action.reason}`);
-      const tradeResult = await executeTrade(action, env);
+      const tradeResult = await executeTrade(action, env, "ai_pick");
       console.log(`[daily-analysis] Sell result: ${tradeResult.success ? "OK" : "FAIL"} — ${tradeResult.reason}`);
       if (tradeResult.success) openTickers.delete(action.ticker);
     }
   }
 
-  // Execute buy picks — top confident picks
+  // Execute buy picks — top confident picks (skip if drawdown halt)
+  if (drawdownCheck.halted) {
+    console.log("[daily-analysis] Skipping all buys — drawdown halt active");
+  }
   for (const pick of result.buyPicks) {
+    if (drawdownCheck.halted) break;
     if (pick.confidence < PORTFOLIO_RULES.MIN_CONFIDENCE) continue;
     if (openTickers.has(pick.ticker)) continue;
 
@@ -216,17 +220,21 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
     );
     const tradeResult = await executeTrade(
       { action: "buy", ticker: pick.ticker, shares, reason: pick.reasoning },
-      env
+      env,
+      "ai_pick"
     );
     console.log(`[daily-analysis] Buy result: ${tradeResult.success ? "OK" : "FAIL"} — ${tradeResult.reason}`);
     if (tradeResult.success) openTickers.add(pick.ticker);
   }
 
-  // 8. Ensure portfolio is at least 85% invested
+  // 8. Ensure portfolio is at least 85% invested (skip if drawdown halt)
+  if (drawdownCheck.halted) {
+    console.log("[daily-analysis] Skipping force-invest — drawdown halt active");
+  }
   const postTradeState = await getAccountState(env);
   const postCashPct = postTradeState.cash / postTradeState.totalValue;
 
-  if (postCashPct > PORTFOLIO_RULES.MAX_CASH_PCT) {
+  if (!drawdownCheck.halted && postCashPct > PORTFOLIO_RULES.MAX_CASH_PCT) {
     console.log(
       `[daily-analysis] Cash still at ${(postCashPct * 100).toFixed(1)}% after AI picks — force-investing remaining`
     );
@@ -253,7 +261,8 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
       );
       await executeTrade(
         { action: "buy", ticker: pick.ticker, shares, reason: `Force-invest: cash above ${PORTFOLIO_RULES.MAX_CASH_PCT * 100}% max` },
-        env
+        env,
+        "force_invest"
       );
     }
   }

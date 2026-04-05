@@ -460,6 +460,100 @@ export async function checkEarningsProximity(
   return { nearEarnings, daysUntil };
 }
 
+// ─── Fetch & save earnings calendar from Finnhub ───
+
+export async function fetchAndSaveEarningsCalendar(env: Env): Promise<void> {
+  const db = getDb(env);
+  const now = new Date();
+  const from = now.toISOString().split("T")[0];
+  const to = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+
+  try {
+    const res = await fetch(
+      `https://finnhub.io/api/v1/calendar/earnings?from=${from}&to=${to}&token=${env.FINNHUB_API_KEY}`
+    );
+    if (!res.ok) {
+      console.error(`[risk-manager] Earnings calendar fetch failed: ${res.status}`);
+      return;
+    }
+
+    const data = (await res.json()) as {
+      earningsCalendar?: Array<{
+        symbol: string;
+        date: string;
+        hour: string;
+        epsEstimate: number | null;
+      }>;
+    };
+
+    const entries = data.earningsCalendar || [];
+    let saved = 0;
+
+    for (const entry of entries) {
+      if (!entry.symbol || !entry.date) continue;
+      try {
+        await db
+          .delete(earningsCalendar)
+          .where(
+            and(
+              eq(earningsCalendar.ticker, entry.symbol),
+              eq(earningsCalendar.reportDate, entry.date)
+            )
+          );
+        await db.insert(earningsCalendar).values({
+          ticker: entry.symbol,
+          reportDate: entry.date,
+          estimateEps: entry.epsEstimate,
+          status: "upcoming",
+          updatedAt: now.toISOString(),
+        });
+        saved++;
+      } catch {
+        // Ignore individual insert errors
+      }
+    }
+
+    console.log(`[risk-manager] Saved ${saved} earnings calendar entries (${from} to ${to})`);
+  } catch (err) {
+    console.error("[risk-manager] Earnings calendar fetch error:", err);
+  }
+}
+
+// ─── Get upcoming earnings for specific tickers ───
+
+export async function getUpcomingEarnings(
+  tickers: string[],
+  env: Env
+): Promise<Array<{ ticker: string; date: string }>> {
+  const db = getDb(env);
+  const today = new Date().toISOString().split("T")[0];
+  const results: Array<{ ticker: string; date: string }> = [];
+
+  for (const ticker of tickers) {
+    const earnings = await db
+      .select()
+      .from(earningsCalendar)
+      .where(
+        and(
+          eq(earningsCalendar.ticker, ticker),
+          eq(earningsCalendar.status, "upcoming"),
+          gte(earningsCalendar.reportDate, today)
+        )
+      )
+      .orderBy(earningsCalendar.reportDate)
+      .limit(1);
+
+    if (earnings.length > 0) {
+      results.push({
+        ticker: earnings[0].ticker,
+        date: earnings[0].reportDate,
+      });
+    }
+  }
+
+  return results;
+}
+
 // ─── Fetch historical prices from DB for technical analysis ───
 
 export async function getHistoricalPrices(

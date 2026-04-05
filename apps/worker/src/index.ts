@@ -6,6 +6,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { trades, news, prices, analysis } from "./db/schema";
 import { getAccountState } from "./services/portfolio";
 import { getCachedPrice } from "./services/price-api";
+import { computePortfolioMetrics, getSectorExposure } from "./services/risk-manager";
 import { handlePriceFetch } from "./crons/price-fetch";
 import { handleNewsScrape } from "./crons/news-scrape";
 import { handleDailyAnalysis } from "./crons/daily-analysis";
@@ -248,6 +249,42 @@ app.get("/api/report", async (c) => {
         : null,
       riskWarnings: r.riskWarnings ? safeParse(r.riskWarnings, null) : null,
     })),
+  });
+});
+
+// Alerts — latest alerts from KV
+app.get("/api/alerts", async (c) => {
+  const rawAlerts = await c.env.CACHE.get("alerts");
+  const alerts = rawAlerts ? safeParse(rawAlerts, []) : [];
+  return c.json({ alerts });
+});
+
+// Risk metrics — current portfolio risk metrics
+app.get("/api/metrics", async (c) => {
+  const state = await getAccountState(c.env);
+  const metrics = await computePortfolioMetrics(c.env);
+  const sectorExposure = getSectorExposure(state.positions, state.totalValue);
+
+  // Get prediction accuracy from KV cache or compute
+  let predictionAccuracy = null;
+  const cachedAccuracy = await c.env.CACHE.get("prediction_accuracy");
+  if (cachedAccuracy) {
+    predictionAccuracy = safeParse(cachedAccuracy, null);
+  }
+
+  return c.json({
+    sharpe30d: metrics.sharpe30d,
+    maxDrawdown: metrics.maxDrawdown,
+    currentDrawdown: metrics.currentDrawdown,
+    beta: metrics.beta,
+    sectorExposure,
+    predictionAccuracy,
+    portfolio: {
+      totalValue: state.totalValue,
+      cash: state.cash,
+      positionCount: state.positions.length,
+      totalPnlPercent: state.totalPnlPercent,
+    },
   });
 });
 

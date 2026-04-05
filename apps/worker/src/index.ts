@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { and, desc, eq, gte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { trades, news, prices, analysis, dailySnapshots, earningsCalendar, portfolio } from "./db/schema";
+import { trades, news, prices, analysis, dailySnapshots, earningsCalendar, portfolio, pushSubscriptions } from "./db/schema";
 import { getAccountState } from "./services/portfolio";
 import { getCachedPrice, fetchQuote } from "./services/price-api";
 import { computePortfolioMetrics, getSectorExposure } from "./services/risk-manager";
@@ -13,6 +13,7 @@ import { handleNewsScrape } from "./crons/news-scrape";
 import { handleDailyAnalysis } from "./crons/daily-analysis";
 import { handleWeeklyReport } from "./crons/weekly-report";
 import { getRiskProfile, getRiskLevel, getRiskProfiles, isValidRiskLevel } from "./services/risk-profile";
+import { getNtfyTopic } from "./services/alerter";
 import { LOGIN_HTML } from "./login";
 import type { Env } from "./types";
 
@@ -599,6 +600,73 @@ app.post("/api/trigger/analysis", async (c) => {
   } catch (e) {
     return c.json({ ok: false, error: String(e) }, 500);
   }
+});
+
+// ─── Push notification endpoints ───
+
+// Get ntfy.sh topic info for subscribing
+app.get("/api/push-info", async (c) => {
+  const topic = getNtfyTopic(c.env);
+  if (!topic) {
+    return c.json({ enabled: false, topic: null, subscribeUrl: null });
+  }
+  return c.json({
+    enabled: true,
+    topic,
+    subscribeUrl: `https://ntfy.sh/${topic}`,
+    webUrl: `https://ntfy.sh/${topic}`,
+    appUrls: {
+      android: "https://play.google.com/store/apps/details?id=io.heckel.ntfy",
+      ios: "https://apps.apple.com/app/ntfy/id1625396347",
+    },
+  });
+});
+
+// Save push subscription (for future Web Push support)
+app.post("/api/push/subscribe", async (c) => {
+  const body = await c.req.json<{
+    endpoint?: string;
+    keys?: { p256dh?: string; auth?: string };
+  }>();
+
+  if (!body.endpoint || !body.keys?.p256dh || !body.keys?.auth) {
+    return c.json({ error: "Invalid subscription data" }, 400);
+  }
+
+  const db = drizzle(c.env.DB);
+  await db
+    .insert(pushSubscriptions)
+    .values({
+      endpoint: body.endpoint,
+      p256dh: body.keys.p256dh,
+      auth: body.keys.auth,
+      createdAt: new Date().toISOString(),
+    })
+    .onConflictDoUpdate({
+      target: pushSubscriptions.endpoint,
+      set: {
+        p256dh: body.keys.p256dh,
+        auth: body.keys.auth,
+        createdAt: new Date().toISOString(),
+      },
+    });
+
+  return c.json({ ok: true });
+});
+
+// Remove push subscription
+app.post("/api/push/unsubscribe", async (c) => {
+  const body = await c.req.json<{ endpoint?: string }>();
+  if (!body.endpoint) {
+    return c.json({ error: "Missing endpoint" }, 400);
+  }
+
+  const db = drizzle(c.env.DB);
+  await db
+    .delete(pushSubscriptions)
+    .where(eq(pushSubscriptions.endpoint, body.endpoint));
+
+  return c.json({ ok: true });
 });
 
 // ─── Settings endpoints ───

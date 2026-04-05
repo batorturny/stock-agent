@@ -227,6 +227,21 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
 @keyframes slideUp{from{transform:translateY(100px);opacity:0}to{transform:translateY(0);opacity:1}}
 .pwa-install{position:fixed;bottom:1rem;left:1rem;background:var(--blue);color:white;border:none;border-radius:10px;padding:.6rem 1rem;font-size:.8rem;font-weight:600;cursor:pointer;z-index:50;display:none;box-shadow:0 4px 12px rgba(59,130,246,.4)}
 
+/* Push notification info box */
+.push-info-box{background:var(--blue-50);border:1px solid var(--blue);border-radius:10px;padding:1rem;margin-top:.75rem;font-size:.8rem;line-height:1.5}
+.push-info-box a{color:var(--blue-dark);font-weight:600;text-decoration:underline}
+.push-info-box a:hover{color:var(--blue)}
+.push-info-title{font-weight:700;font-size:.85rem;margin-bottom:.5rem;display:flex;align-items:center;gap:.5rem}
+.push-info-steps{margin:.5rem 0;padding-left:1.25rem}
+.push-info-steps li{margin-bottom:.35rem}
+.push-topic{font-family:'SF Mono',Consolas,monospace;background:var(--card-bg);border:1px solid var(--card-border);padding:2px 8px;border-radius:4px;font-size:.75rem;user-select:all;cursor:pointer}
+.push-apps{display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap}
+.push-app-link{display:inline-flex;align-items:center;gap:.25rem;padding:4px 10px;border-radius:6px;font-size:.7rem;font-weight:600;text-decoration:none;border:1px solid var(--card-border);color:var(--dark);background:var(--card-bg);transition:border-color .15s}
+.push-app-link:hover{border-color:var(--blue);color:var(--blue)}
+.push-status{display:inline-flex;align-items:center;gap:.35rem;font-size:.75rem;padding:3px 10px;border-radius:99px;font-weight:600}
+.push-status-on{background:#dcfce7;color:var(--green)}
+.push-status-off{background:var(--gray-light);color:var(--gray)}
+
 /* Dark mode */
 @media(prefers-color-scheme:dark){
   :root{
@@ -249,6 +264,10 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
   .chart-label{fill:var(--gray)}
   .chart-grid{stroke:var(--card-border)}
   .chart-dot:last-of-type{stroke:var(--card-bg)}
+  .push-info-box{background:#1e3a5f;border-color:#2d5a8f}
+  .push-info-box a{color:#60a5fa}
+  .push-status-on{background:#064e3b;color:#34d399}
+  .push-app-link{background:var(--card-bg);border-color:var(--card-border);color:var(--dark)}
 }
 </style>
 </head>
@@ -287,6 +306,13 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
       <span id="alerts-toggle" style="font-size:.75rem;color:var(--blue)">▼ Mind</span>
     </div>
     <div id="alerts-list"></div>
+    <div id="push-info" class="push-info-box" style="display:none">
+      <div class="push-info-title">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
+        Push Értesítések (ntfy.sh)
+      </div>
+      <div id="push-info-content"></div>
+    </div>
   </div>
 
   <!-- Portfolio Value Chart -->
@@ -1200,9 +1226,52 @@ async function changeRiskProfile(level) {
   } catch(e) { console.error('Risk profile change error:', e); }
 }
 
+// === Push Notification Info ===
+async function loadPushInfo() {
+  try {
+    var data = await load('/push-info');
+    if (!data || !data.enabled) return;
+    var el = $('push-info');
+    var content = $('push-info-content');
+    el.style.display = 'block';
+    var topicSpan = '<span class="push-topic" onclick="copyTopic(this)" title="Kattints a másoláshoz">' + data.topic + '</span>';
+    content.innerHTML =
+      '<p>Valós push értesítések a telefonodra, még ha a böngésző zárva van:</p>' +
+      '<ol class="push-info-steps">' +
+      '<li>Telepítsd az <strong>ntfy</strong> appot (ingyenes, nyílt forráskódú)</li>' +
+      '<li>Iratkozz fel erre a topicra: ' + topicSpan + '</li>' +
+      '<li>Kész! Minden trade/alert értesítés megérkezik push-ban.</li>' +
+      '</ol>' +
+      '<div class="push-apps">' +
+      '<a class="push-app-link" href="' + data.appUrls.android + '" target="_blank" rel="noopener">📱 Android (Play Store)</a>' +
+      '<a class="push-app-link" href="' + data.appUrls.ios + '" target="_blank" rel="noopener">🍎 iOS (App Store)</a>' +
+      '<a class="push-app-link" href="' + data.webUrl + '" target="_blank" rel="noopener">🌐 Webes feliratkozás</a>' +
+      '</div>' +
+      '<div style="margin-top:.5rem"><span class="push-status push-status-on">● Push aktív</span></div>';
+  } catch (e) {
+    console.error('Push info load error:', e);
+  }
+}
+
+function copyTopic(el) {
+  var text = el.textContent;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(function() {
+      el.textContent = 'Másolva!';
+      setTimeout(function() { el.textContent = text; }, 1500);
+    });
+  }
+}
+
+// Tell service worker to start background polling
+if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+  navigator.serviceWorker.controller.postMessage({ type: 'START_POLLING' });
+}
+
 refresh();
 loadAlerts();
 loadRiskProfile();
+loadPushInfo();
 // Auto-refresh display every 60s, auto-trigger data fetch every 15 min
 setInterval(refresh, 60000);
 setInterval(triggerAll, 15 * 60000);
@@ -1210,6 +1279,12 @@ setInterval(triggerAll, 15 * 60000);
 setInterval(updateRefreshTimer, 30000);
 // Refresh alerts every 60s
 setInterval(loadAlerts, 60000);
+// Keep service worker alive with periodic ping
+setInterval(function() {
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({ type: 'PING' });
+  }
+}, 120000);
 </script>
 </body>
 </html>`;

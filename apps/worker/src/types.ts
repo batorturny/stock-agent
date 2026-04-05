@@ -9,6 +9,7 @@ export type Env = {
   RISK_PROFILE?: string;
   DASHBOARD_ORIGIN?: string;
   ALERT_WEBHOOK?: string;
+  NTFY_TOPIC?: string;
 };
 
 export type BuyPick = {

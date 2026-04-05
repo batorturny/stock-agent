@@ -135,6 +135,14 @@ export const earningsCalendar = sqliteTable("earnings_calendar", {
   updatedAt: text("updated_at").notNull(),
 });
 
+export const pushSubscriptions = sqliteTable("push_subscriptions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  endpoint: text("endpoint").notNull().unique(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
 export const investmentPlans = sqliteTable("investment_plans", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   ticker: text("ticker").notNull(),

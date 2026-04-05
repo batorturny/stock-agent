@@ -50,16 +50,50 @@ export async function sendAlert(
 
   // Send to webhook if configured (Discord/Telegram)
   const webhookUrl = env.ALERT_WEBHOOK;
-  if (!webhookUrl) return;
-
-  try {
-    await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: formatted }),
-    });
-  } catch {
-    // Webhook failure should not break the flow
-    console.error(`[alerter] Webhook delivery failed for: ${message}`);
+  if (webhookUrl) {
+    try {
+      await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: formatted }),
+      });
+    } catch {
+      console.error(`[alerter] Webhook delivery failed for: ${message}`);
+    }
   }
+
+  // Send push notification via ntfy.sh
+  const ntfyTopic = getNtfyTopic(env);
+  if (ntfyTopic) {
+    try {
+      const priority = level === "critical" ? "5" : level === "warning" ? "3" : "2";
+      const tags =
+        level === "critical"
+          ? "rotating_light"
+          : level === "warning"
+            ? "warning"
+            : "chart_with_upwards_trend";
+      await fetch(`https://ntfy.sh/${ntfyTopic}`, {
+        method: "POST",
+        headers: {
+          Title: "Stock Agent",
+          Priority: priority,
+          Tags: tags,
+        },
+        body: message,
+      });
+    } catch {
+      console.error(`[alerter] ntfy.sh delivery failed for: ${message}`);
+    }
+  }
+}
+
+/** Derive a stable ntfy topic from env config or Finnhub key hash */
+export function getNtfyTopic(env: Env): string | null {
+  if (env.NTFY_TOPIC) return env.NTFY_TOPIC;
+  // Auto-generate from last 8 chars of Finnhub key for uniqueness
+  if (env.FINNHUB_API_KEY && env.FINNHUB_API_KEY.length >= 8) {
+    return "stock-agent-" + env.FINNHUB_API_KEY.slice(-8).toLowerCase();
+  }
+  return null;
 }

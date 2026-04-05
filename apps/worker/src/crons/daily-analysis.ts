@@ -2,7 +2,7 @@ import { desc, gte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { news, prices, analysis, predictions } from "../db/schema";
 import { runDailyAnalysis } from "../services/ai-analyst";
-import { getAccountState, executeTrade, rebalancePortfolio } from "../services/portfolio";
+import { getAccountState, executeTrade, rebalancePortfolio, autoInvestExcessCash } from "../services/portfolio";
 import { getCachedPrice } from "../services/price-api";
 import {
   checkDrawdownHalt,
@@ -283,9 +283,10 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
       `[daily-analysis] Cash still at ${(postCashPct * 100).toFixed(1)}% after AI picks — force-investing remaining`
     );
 
-    // Buy more of the top confident picks that we already hold or new ones
+    // Build candidate list: AI picks first, then fall back to existing positions
     const sortedPicks = [...result.buyPicks].sort((a, b) => b.confidence - a.confidence);
 
+    // Phase 1: Buy AI picks (new or add to existing)
     for (const pick of sortedPicks) {
       const latestState = await getAccountState(env);
       const latestCashPct = latestState.cash / latestState.totalValue;
@@ -297,7 +298,8 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
       const currentPrice = (await getCachedPrice(pick.ticker, env))?.price;
       if (!currentPrice) continue;
 
-      const shares = Math.floor(Math.min(excessCash * 0.5, latestState.totalValue * 0.15) / currentPrice);
+      // Invest up to the full per-position allocation (not just 50%)
+      const shares = Math.floor(Math.min(excessCash, latestState.totalValue * PORTFOLIO_RULES.MAX_SINGLE_POSITION_PCT) / currentPrice);
       if (shares <= 0) continue;
 
       console.log(
@@ -308,6 +310,16 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
         env,
         "force_invest"
       );
+    }
+
+    // Phase 2: If still over max cash, add to existing positions proportionally
+    const afterPicksState = await getAccountState(env);
+    const afterPicksCashPct = afterPicksState.cash / afterPicksState.totalValue;
+    if (afterPicksCashPct > PORTFOLIO_RULES.MAX_CASH_PCT) {
+      console.log(
+        `[daily-analysis] Still ${(afterPicksCashPct * 100).toFixed(1)}% cash after AI picks — distributing to existing positions`
+      );
+      await autoInvestExcessCash(env);
     }
   }
 

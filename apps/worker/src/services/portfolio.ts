@@ -18,7 +18,7 @@ import { sendAlert } from "./alerter";
 async function acquireTradeLock(env: Env): Promise<boolean> {
   const existing = await env.CACHE.get("trade_lock");
   if (existing) return false;
-  await env.CACHE.put("trade_lock", "1", { expirationTtl: 30 });
+  await env.CACHE.put("trade_lock", "1", { expirationTtl: 60 });
   return true;
 }
 
@@ -282,8 +282,9 @@ async function executeTradeInner(
 
     console.log(`[portfolio] BUY ${action.shares} ${action.ticker} @ $${price.toFixed(2)} (slippage from $${rawPrice.toFixed(2)}) | cash: $${newCash.toFixed(2)} | trigger: ${triggerType}`);
 
-    // After buy: auto-invest remaining cash if needed
-    await autoInvestExcessCash(env);
+    // NOTE: autoInvestExcessCash removed from here — it caused silent failures
+    // because executeTrade holds the trade lock and autoInvest calls executeTrade
+    // recursively (lock re-entry fails). Called from daily-analysis.ts instead.
 
     return { success: true, reason: `Bought ${action.shares} ${action.ticker} @ $${price.toFixed(2)}` };
   }
@@ -366,8 +367,8 @@ async function executeTradeInner(
       );
       console.log(`[portfolio] Rotation flagged: $${sellTotal.toFixed(2)} freed from ${action.ticker}`);
     } else {
-      // Partial sell — still auto-invest excess
-      await autoInvestExcessCash(env);
+      // Partial sell — auto-invest handled externally (not here due to trade lock)
+      console.log(`[portfolio] Partial sell of ${action.ticker} — auto-invest deferred to caller`);
     }
 
     return { success: true, reason: `Sold ${sellShares} ${action.ticker} @ $${price.toFixed(2)}` };
@@ -580,8 +581,8 @@ export async function rebalancePortfolio(env: Env): Promise<string[]> {
   const cashPct = refreshedState.cash / refreshedState.totalValue;
 
   if (cashPct > PORTFOLIO_RULES.MAX_CASH_PCT) {
-    actions.push(`REBALANCE: Cash at ${(cashPct * 100).toFixed(1)}% — exceeds ${PORTFOLIO_RULES.MAX_CASH_PCT * 100}% max. Auto-invest needed.`);
-    // Auto-invest is handled by autoInvestExcessCash or daily-analysis
+    actions.push(`REBALANCE: Cash at ${(cashPct * 100).toFixed(1)}% — exceeds ${PORTFOLIO_RULES.MAX_CASH_PCT * 100}% max. Running auto-invest.`);
+    await autoInvestExcessCash(env);
   }
 
   console.log(`[portfolio] Rebalance complete: ${actions.length} actions`);
@@ -595,7 +596,7 @@ export async function rebalancePortfolio(env: Env): Promise<string[]> {
  * that are under 20% allocation, proportionally.
  * This is called after every trade to stay always-invested.
  */
-async function autoInvestExcessCash(env: Env): Promise<void> {
+export async function autoInvestExcessCash(env: Env): Promise<void> {
   const state = await getAccountState(env);
   const cashPct = state.cash / state.totalValue;
 

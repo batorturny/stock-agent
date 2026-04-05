@@ -38,9 +38,13 @@ const SECTOR_UNIVERSE: Record<string, string[]> = {
     "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "HAL",
     "DVN", "FANG", "HES", "BKR", "KMI",
   ],
-  Consumer: [
-    "WMT", "PG", "COST", "HD", "NKE", "MCD", "SBUX", "TGT", "LOW", "TJX",
-    "DG", "DLTR", "KO", "PEP", "CL",
+  "Consumer Discretionary": [
+    "HD", "NKE", "MCD", "SBUX", "TGT", "LOW", "TJX", "BKNG", "ORLY", "DHI",
+    "LEN", "GM", "F", "YUM", "CMG",
+  ],
+  "Consumer Staples": [
+    "WMT", "PG", "COST", "KO", "PEP", "CL", "PM", "MO", "MDLZ", "KHC",
+    "DG", "DLTR", "STZ", "SYY", "KR",
   ],
   Industrial: [
     "CAT", "HON", "UNP", "RTX", "GE", "BA", "LMT", "DE", "MMM", "FDX",
@@ -52,6 +56,14 @@ const SECTOR_UNIVERSE: Record<string, string[]> = {
   ],
   "Gold Miners": [
     "NEM", "GOLD", "AEM", "FNV", "WPM", "KGC", "AGI", "BTG", "HMY", "AU",
+  ],
+  Utilities: [
+    "NEE", "DUK", "SO", "D", "AEP", "SRE", "EXC", "XEL", "ED", "WEC",
+    "ES", "AWK", "ATO", "CMS", "DTE",
+  ],
+  "Real Estate": [
+    "PLD", "AMT", "CCI", "EQIX", "PSA", "SPG", "O", "WELL", "DLR", "AVB",
+    "EQR", "VTR", "ARE", "MAA", "UDR",
   ],
   Materials: [
     "LIN", "APD", "ECL", "SHW", "NUE", "FCX", "STLD", "DOW", "DD", "VMC",

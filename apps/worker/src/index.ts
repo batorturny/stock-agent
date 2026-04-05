@@ -624,37 +624,44 @@ app.post("/api/settings/risk-profile", async (c) => {
 export default {
   fetch: app.fetch,
   async scheduled(
-    event: ScheduledEvent,
+    _event: ScheduledEvent,
     env: Env,
     ctx: ExecutionContext
   ): Promise<void> {
-    switch (event.cron) {
-      case "*/15 * * * *":
-        ctx.waitUntil(
-          handlePriceFetch(env).catch((e) =>
-            console.error("Price fetch failed:", e)
-          )
-        );
-        ctx.waitUntil(
-          handleNewsScrape(env).catch((e) =>
-            console.error("News scrape failed:", e)
-          )
-        );
-        break;
-      case "0 6 * * *":
-        ctx.waitUntil(
-          handleDailyAnalysis(env).catch((e) =>
-            console.error("Daily analysis failed:", e)
-          )
-        );
-        break;
-      case "0 7 * * 1":
-        ctx.waitUntil(
-          handleWeeklyReport(env).catch((e) =>
-            console.error("Weekly report failed:", e)
-          )
-        );
-        break;
+    // Single cron runs every 15 min — handles ALL jobs internally
+    const now = new Date();
+    const hour = now.getUTCHours();
+    const minute = now.getUTCMinutes();
+    const day = now.getUTCDay(); // 0=Sun, 1=Mon
+
+    // ALWAYS: price fetch + news scrape (every 15 min)
+    ctx.waitUntil(
+      handlePriceFetch(env).catch((e) =>
+        console.error("[cron] Price fetch failed:", e)
+      )
+    );
+    ctx.waitUntil(
+      handleNewsScrape(env).catch((e) =>
+        console.error("[cron] News scrape failed:", e)
+      )
+    );
+
+    // DAILY: AI analysis at 06:00 UTC (first 15-min window: 06:00-06:14)
+    if (hour === 6 && minute < 15) {
+      ctx.waitUntil(
+        handleDailyAnalysis(env).catch((e) =>
+          console.error("[cron] Daily analysis failed:", e)
+        )
+      );
+    }
+
+    // WEEKLY: report on Monday at 07:00 UTC
+    if (day === 1 && hour === 7 && minute < 15) {
+      ctx.waitUntil(
+        handleWeeklyReport(env).catch((e) =>
+          console.error("[cron] Weekly report failed:", e)
+        )
+      );
     }
   },
 };

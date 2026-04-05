@@ -350,8 +350,25 @@ async function executeTradeInner(
 
     console.log(`[portfolio] SELL ${sellShares} ${action.ticker} @ $${price.toFixed(2)} (slippage from $${rawPrice.toFixed(2)}) | cash: $${newCash.toFixed(2)} | trigger: ${triggerType}`);
 
-    // After sell: auto-invest the freed cash
-    await autoInvestExcessCash(env);
+    // ROTATION: flag for immediate reinvestment via price-fetch cycle
+    // Instead of calling autoInvestExcessCash (which can cause recursion),
+    // we store the freed cash info in KV for the next price-fetch to pick up.
+    if (sellShares >= position.shares) {
+      // Full position closed — flag rotation
+      await env.CACHE.put(
+        "pending_rotation",
+        JSON.stringify({
+          freedCash: sellTotal,
+          fromTicker: action.ticker,
+          timestamp: now,
+        }),
+        { expirationTtl: 300 }
+      );
+      console.log(`[portfolio] Rotation flagged: $${sellTotal.toFixed(2)} freed from ${action.ticker}`);
+    } else {
+      // Partial sell — still auto-invest excess
+      await autoInvestExcessCash(env);
+    }
 
     return { success: true, reason: `Sold ${sellShares} ${action.ticker} @ $${price.toFixed(2)}` };
   }

@@ -93,10 +93,25 @@ Before making any recommendation, reason through:
 3. How does this fit the PORTFOLIO ALLOCATION? (sector balance, position count)
 4. What is the TIME HORIZON for the catalyst to play out?
 
+## SECTOR ROTATION INTELLIGENCE
+If a sector ETF is outperforming (>+1% today), PRIORITIZE stocks from that sector for new buys.
+If a sector ETF is underperforming (<-1% today), AVOID new buys in that sector and consider trimming existing positions.
+
+## INSIDER ACTIVITY RULES
+- If insider selling is HEAVY (multiple insiders selling large amounts), DOWNGRADE confidence by 20%.
+- If insider buying is present (especially CEO/CFO), UPGRADE confidence by 10%.
+- React to CEO/founder news — if negative about a leader (resignation, scandal, investigation), SELL associated stock IMMEDIATELY.
+
 ## CURRENT STATE
 
 ### Portfolio
 {portfolio_state}
+
+### Sector Performance (ETF-based)
+{sector_performance}
+
+### Company Profiles & Insider Activity
+{company_context}
 
 ### News — Last 24 Hours (with sentiment scores)
 {recent_news}
@@ -222,10 +237,14 @@ export async function runDailyAnalysis(
   recentNews: string,
   newsTrends: string,
   priceHistory: string,
+  sectorPerformance: string,
+  companyContext: string,
   env: Env
 ): Promise<DailyAnalysis> {
   const prompt = DAILY_ANALYSIS_PROMPT
     .replace("{portfolio_state}", portfolioState)
+    .replace("{sector_performance}", sectorPerformance || "No sector data available")
+    .replace("{company_context}", companyContext || "No company profile data available")
     .replace("{recent_news}", recentNews)
     .replace("{news_trends}", newsTrends)
     .replace("{price_history}", priceHistory);

@@ -14,6 +14,7 @@ import {
   computeMACD,
 } from "../services/risk-manager";
 import { sendAlert } from "../services/alerter";
+import { buildCompanyContext, getCachedSectorPerformance, getCachedWatchlist } from "../services/stock-screener";
 import type { Env } from "../types";
 import { PORTFOLIO_RULES } from "../types";
 
@@ -91,10 +92,18 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
     .map((p) => `${p.ticker}: $${p.price} @ ${p.recordedAt}`)
     .join("\n");
 
-  // 4b. Compute technical indicators for portfolio + watchlist tickers
+  // 4b. Compute technical indicators for portfolio + dynamic watchlist tickers
   const portfolioTickers = accountState.positions.map((p) => p.ticker);
-  const watchlistTickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "JPM", "AMD", "NFLX"];
-  const allTickersForTA = [...new Set([...portfolioTickers, ...watchlistTickers])];
+
+  // Use dynamic watchlist instead of static list
+  let watchlistTickers: string[];
+  try {
+    watchlistTickers = await getCachedWatchlist(env);
+  } catch {
+    watchlistTickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "JPM", "AMD", "NFLX"];
+  }
+
+  const allTickersForTA = [...new Set([...portfolioTickers, ...watchlistTickers.slice(0, 15)])];
 
   const technicalData: string[] = [];
   for (const ticker of allTickersForTA) {
@@ -142,14 +151,49 @@ export async function handleDailyAnalysis(env: Env): Promise<void> {
     await sendAlert(`DRAWDOWN HALT: portfolio down ${drawdownCheck.drawdownPct}% from peak — all buying paused`, "critical", env);
   }
 
-  // 5. Run AI analysis with enriched data
+  // 4f. Get sector performance and company context from stock screener
+  let sectorContext = "";
+  let companyContext = "";
+  try {
+    const sectorPerf = await getCachedSectorPerformance(env);
+    if (sectorPerf.length > 0) {
+      sectorContext = sectorPerf
+        .map((s) =>
+          `${s.sector} (${s.etf}): ${s.dayChange > 0 ? "+" : ""}${s.dayChange.toFixed(2)}% today`
+        )
+        .join("\n");
+      console.log(`[daily-analysis] Sector performance: ${sectorPerf.length} sectors loaded`);
+    }
+  } catch (err) {
+    console.error("[daily-analysis] Sector performance fetch failed:", err);
+  }
+
+  try {
+    const contextTickers = [
+      ...new Set([...watchlistTickers.slice(0, 10), ...portfolioTickers]),
+    ];
+    companyContext = await buildCompanyContext(contextTickers, env);
+    console.log(`[daily-analysis] Company context built for ${contextTickers.length} tickers`);
+  } catch (err) {
+    console.error("[daily-analysis] Company context build failed:", err);
+  }
+
+  // 5. Run AI analysis with enriched data (sector + company context injected)
   console.log("[daily-analysis] Running AI analysis...");
-  const enrichedPriceHistory = (priceHistory || "No price history available") + technicalIndicators + earningsWarning;
+  const enrichedPriceHistory =
+    (priceHistory || "No price history available") +
+    technicalIndicators +
+    earningsWarning +
+    (sectorContext ? "\n\n### Sector Performance (ETF-based)\n" + sectorContext : "") +
+    (companyContext ? "\n\n### Company Profiles & Insider Activity\n" + companyContext : "");
+
   const result = await runDailyAnalysis(
     portfolioState,
     recentNews || "No recent news available",
     newsTrends || "No trend data available",
     enrichedPriceHistory,
+    sectorContext,
+    companyContext,
     env
   );
 

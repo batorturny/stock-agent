@@ -7,6 +7,7 @@ import { trades, news, prices, analysis } from "./db/schema";
 import { getAccountState } from "./services/portfolio";
 import { getCachedPrice } from "./services/price-api";
 import { computePortfolioMetrics, getSectorExposure } from "./services/risk-manager";
+import { getCachedWatchlist, getCachedSectorPerformance, getCompanyProfile } from "./services/stock-screener";
 import { handlePriceFetch } from "./crons/price-fetch";
 import { handleNewsScrape } from "./crons/news-scrape";
 import { handleDailyAnalysis } from "./crons/daily-analysis";
@@ -286,6 +287,55 @@ app.get("/api/metrics", async (c) => {
       totalPnlPercent: state.totalPnlPercent,
     },
   });
+});
+
+// Dynamic watchlist — current screener-ranked tickers with sector context
+app.get("/api/watchlist", async (c) => {
+  try {
+    const watchlist = await getCachedWatchlist(c.env);
+    const sectorPerf = await getCachedSectorPerformance(c.env);
+
+    // Enrich watchlist with company profiles
+    const enriched = await Promise.all(
+      watchlist.map(async (ticker) => {
+        const price = await getCachedPrice(ticker, c.env);
+        const profile = await getCompanyProfile(ticker, c.env);
+        return {
+          ticker,
+          price: price?.price ?? null,
+          change: price?.change ?? null,
+          changePercent: price?.changePercent ?? null,
+          company: profile?.name ?? null,
+          sector: profile?.sector ?? null,
+          marketCap: profile?.marketCap ?? null,
+          ceo: profile?.ceo ?? null,
+        };
+      })
+    );
+
+    return c.json({
+      watchlist: enriched,
+      sectorPerformance: sectorPerf,
+      count: watchlist.length,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    return c.json({ error: "Watchlist unavailable", details: String(err) }, 500);
+  }
+});
+
+// Sector ETF performance — real-time sector rotation data
+app.get("/api/sectors", async (c) => {
+  try {
+    const sectorPerf = await getCachedSectorPerformance(c.env);
+    return c.json({
+      sectors: sectorPerf,
+      count: sectorPerf.length,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    return c.json({ error: "Sector data unavailable", details: String(err) }, 500);
+  }
 });
 
 // Manual trigger endpoints (bypass cron limits)

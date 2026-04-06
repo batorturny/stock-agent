@@ -540,18 +540,18 @@ app.get("/api/earnings", async (c) => {
   }> = [];
 
   for (const ticker of tickers) {
-    const upcoming = await db
-      .select()
-      .from(earningsCalendar)
-      .where(
-        and(
-          eq(earningsCalendar.ticker, ticker),
-          eq(earningsCalendar.status, "upcoming"),
-          gte(earningsCalendar.reportDate, today)
-        )
-      )
-      .orderBy(earningsCalendar.reportDate)
-      .limit(1);
+    let upcoming: Array<typeof earningsCalendar.$inferSelect> = [];
+    try {
+      const all = await db
+        .select()
+        .from(earningsCalendar)
+        .where(eq(earningsCalendar.ticker, ticker))
+        .orderBy(earningsCalendar.reportDate)
+        .limit(5);
+      upcoming = all.filter(e => e.status === "upcoming" && e.reportDate >= today);
+    } catch {
+      continue;
+    }
 
     if (upcoming.length > 0) {
       const earningsDate = new Date(upcoming[0].reportDate);

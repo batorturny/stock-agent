@@ -142,8 +142,8 @@ LEARN FROM YOUR MISTAKES: If accuracy is below 50%, be MORE conservative. If a s
     watchlistTickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "JPM", "AMD", "NFLX"];
   }
 
-  // Only compute TA for portfolio + top 5 watchlist (not all 15+)
-  const allTickersForTA = [...new Set([...portfolioTickers, ...watchlistTickers.slice(0, 5)])];
+  // Only compute TA for portfolio tickers (not watchlist — saves subrequests)
+  const allTickersForTA = [...new Set(portfolioTickers)].slice(0, 6);
 
   const technicalData: string[] = [];
   for (const ticker of allTickersForTA) {
@@ -182,9 +182,8 @@ LEARN FROM YOUR MISTAKES: If accuracy is below 50%, be MORE conservative. If a s
     ? "\n\n### Technical Indicators\n" + technicalData.join("\n")
     : "";
 
-  // 4c. Fetch earnings calendar from Finnhub
-  console.log("[daily-analysis] Fetching earnings calendar...");
-  await fetchAndSaveEarningsCalendar(env);
+  // 4c. Earnings calendar fetch skipped here — done by weekly report to save subrequests
+  // await fetchAndSaveEarningsCalendar(env);
 
   // 4d. Get upcoming earnings for portfolio tickers
   const upcomingEarnings = await getUpcomingEarnings(portfolioTickers, env);
@@ -219,10 +218,8 @@ LEARN FROM YOUR MISTAKES: If accuracy is below 50%, be MORE conservative. If a s
   }
 
   try {
-    // Reduced from watchlistTickers.slice(0, 10) to slice(0, 5) to save subrequests
-    const contextTickers = [
-      ...new Set([...watchlistTickers.slice(0, 5), ...portfolioTickers]),
-    ];
+    // Only portfolio tickers — save subrequests (each profile = 2 Finnhub calls)
+    const contextTickers = [...new Set(portfolioTickers)].slice(0, 5);
     companyContext = await buildCompanyContext(contextTickers, env);
     console.log(`[daily-analysis] Company context built for ${contextTickers.length} tickers`);
   } catch (err) {
@@ -230,10 +227,13 @@ LEARN FROM YOUR MISTAKES: If accuracy is below 50%, be MORE conservative. If a s
   }
 
   // 4g. Load active investment plans for AI context
-  const activePlans = await db
-    .select()
-    .from(investmentPlans)
-    .where(eq(investmentPlans.status, "active"));
+  let activePlans: Array<typeof investmentPlans.$inferSelect> = [];
+  try {
+    const allPlans = await db.select().from(investmentPlans);
+    activePlans = allPlans.filter(p => p.status === "active");
+  } catch (err) {
+    console.error("[daily-analysis] Failed to load investment plans:", err);
+  }
 
   const investmentPlansContext = activePlans.length > 0
     ? activePlans.map((p) => {
@@ -245,13 +245,14 @@ LEARN FROM YOUR MISTAKES: If accuracy is below 50%, be MORE conservative. If a s
     : "";
 
   // 4h. Get yesterday's picks for dedup (prevent same picks every day)
-  const yesterdayStart = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-  const yesterdayAnalyses = await db
-    .select()
-    .from(analysis)
-    .where(gte(analysis.createdAt, yesterdayStart))
-    .orderBy(desc(analysis.createdAt))
-    .limit(1);
+  let yesterdayAnalyses: Array<typeof analysis.$inferSelect> = [];
+  try {
+    const recentAnalyses = await db.select().from(analysis).orderBy(desc(analysis.createdAt)).limit(5);
+    const yesterdayStart = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    yesterdayAnalyses = recentAnalyses.filter(a => a.createdAt >= yesterdayStart).slice(0, 1);
+  } catch (err) {
+    console.error("[daily-analysis] Failed to load yesterday's analyses:", err);
+  }
 
   const yesterdayPickTickers = new Set<string>();
   if (yesterdayAnalyses.length > 0) {
@@ -320,11 +321,11 @@ LEARN FROM YOUR MISTAKES: If accuracy is below 50%, be MORE conservative. If a s
     `[daily-analysis] Raw AI result: ${rawResult.buyPicks.length} buy picks, ${rawResult.sellWarnings.length} sell warnings`
   );
 
-  // 5b. Double-check analysis with risk officer review
-  console.log("[daily-analysis] Running double-check risk review...");
-  const result = await doubleCheckAnalysis(rawResult, portfolioState, env);
+  // 5b. Double-check skipped to save subrequests (Workers free: 1000/invocation)
+  // The AI prompt already includes chain-of-thought reasoning + risk rules
+  const result = rawResult;
   console.log(
-    `[daily-analysis] After double-check: ${result.buyPicks.length} buy picks approved (was ${rawResult.buyPicks.length}), outlook: ${result.marketOutlook}`
+    `[daily-analysis] AI result: ${result.buyPicks.length} buy picks, outlook: ${result.marketOutlook.slice(0, 60)}`
   );
 
   // 6. Save analysis

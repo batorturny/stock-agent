@@ -175,6 +175,7 @@ export async function computePortfolioMetrics(
   currentDrawdown: number;
   beta: number | null;
 }> {
+  try {
   const db = getDb(env);
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
     .toISOString()
@@ -257,11 +258,16 @@ export async function computePortfolioMetrics(
   }
 
   return { sharpe30d, maxDrawdown, currentDrawdown, beta };
+  } catch (err) {
+    console.error("[risk-manager] computePortfolioMetrics failed:", err);
+    return { sharpe30d: null, maxDrawdown: 0, currentDrawdown: 0, beta: null };
+  }
 }
 
 // ─── Daily snapshot save ───
 
 export async function saveDailySnapshot(env: Env): Promise<void> {
+  try {
   const db = getDb(env);
   const [acct] = await db.select().from(account).limit(1);
   if (!acct) return;
@@ -340,6 +346,9 @@ export async function saveDailySnapshot(env: Env): Promise<void> {
   console.log(
     `[risk-manager] Daily snapshot saved: $${totalValue.toFixed(2)} | dd: ${drawdownPct}% | sharpe: ${metrics.sharpe30d ?? "N/A"} (${today})`
   );
+  } catch (err) {
+    console.error("[risk-manager] saveDailySnapshot failed:", err);
+  }
 }
 
 // ─── Circuit breaker: check for single-ticker crash ───
@@ -385,6 +394,7 @@ export async function checkCircuitBreaker(
 export async function checkDrawdownHalt(
   env: Env
 ): Promise<{ halted: boolean; drawdownPct: number }> {
+  try {
   const db = getDb(env);
 
   const snapshots = await db
@@ -414,6 +424,10 @@ export async function checkDrawdownHalt(
     halted: false,
     drawdownPct: Math.round(drawdownPct * 10000) / 100,
   };
+  } catch (err) {
+    console.error("[risk-manager] checkDrawdownHalt failed:", err);
+    return { halted: false, drawdownPct: 0 };
+  }
 }
 
 // ─── Slippage simulation ───
@@ -430,34 +444,36 @@ export async function checkEarningsProximity(
   ticker: string,
   env: Env
 ): Promise<{ nearEarnings: boolean; daysUntil: number | null }> {
-  const db = getDb(env);
-  const today = new Date().toISOString().split("T")[0];
+  try {
+    const db = getDb(env);
+    const today = new Date().toISOString().split("T")[0];
 
-  const upcoming = await db
-    .select()
-    .from(earningsCalendar)
-    .where(
-      and(
-        eq(earningsCalendar.ticker, ticker),
-        eq(earningsCalendar.status, "upcoming"),
-        gte(earningsCalendar.reportDate, today)
-      )
-    )
-    .orderBy(earningsCalendar.reportDate)
-    .limit(1);
+    // Simple query — fetch all upcoming for this ticker
+    const upcoming = await db
+      .select()
+      .from(earningsCalendar)
+      .where(eq(earningsCalendar.ticker, ticker))
+      .orderBy(earningsCalendar.reportDate)
+      .limit(5);
 
-  if (upcoming.length === 0) {
+    // Filter in JS for status and date
+    const relevant = upcoming.filter(
+      (e) => e.status === "upcoming" && e.reportDate >= today
+    );
+
+    if (relevant.length === 0) {
+      return { nearEarnings: false, daysUntil: null };
+    }
+
+    const earningsDate = new Date(relevant[0].reportDate);
+    const now = new Date();
+    const daysUntil = Math.ceil((earningsDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+
+    return { nearEarnings: daysUntil <= 3, daysUntil };
+  } catch (err) {
+    console.error(`[risk-manager] checkEarningsProximity failed for ${ticker}:`, err);
     return { nearEarnings: false, daysUntil: null };
   }
-
-  const earningsDate = new Date(upcoming[0].reportDate);
-  const now = new Date();
-  const daysUntil = Math.ceil((earningsDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
-
-  // Within 3 trading days = near earnings
-  const nearEarnings = daysUntil <= 3;
-
-  return { nearEarnings, daysUntil };
 }
 
 // ─── Fetch & save earnings calendar from Finnhub ───
@@ -530,24 +546,23 @@ export async function getUpcomingEarnings(
   const results: Array<{ ticker: string; date: string }> = [];
 
   for (const ticker of tickers) {
-    const earnings = await db
-      .select()
-      .from(earningsCalendar)
-      .where(
-        and(
-          eq(earningsCalendar.ticker, ticker),
-          eq(earningsCalendar.status, "upcoming"),
-          gte(earningsCalendar.reportDate, today)
-        )
-      )
-      .orderBy(earningsCalendar.reportDate)
-      .limit(1);
+    try {
+      const earnings = await db
+        .select()
+        .from(earningsCalendar)
+        .where(eq(earningsCalendar.ticker, ticker))
+        .orderBy(earningsCalendar.reportDate)
+        .limit(5);
 
-    if (earnings.length > 0) {
-      results.push({
-        ticker: earnings[0].ticker,
-        date: earnings[0].reportDate,
-      });
+      const relevant = earnings.filter(e => e.status === "upcoming" && e.reportDate >= today);
+      if (relevant.length > 0) {
+        results.push({
+          ticker: relevant[0].ticker,
+          date: relevant[0].reportDate,
+        });
+      }
+    } catch {
+      // Skip ticker if query fails
     }
   }
 

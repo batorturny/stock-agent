@@ -1268,13 +1268,42 @@ if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
   navigator.serviceWorker.controller.postMessage({ type: 'START_POLLING' });
 }
 
+// LocalStorage cache — show last known data instantly while fetching fresh
+const LS_KEY = 'stock-agent-cache';
+function saveToCache(key, data) {
+  try {
+    const cache = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+    cache[key] = { data, ts: Date.now() };
+    localStorage.setItem(LS_KEY, JSON.stringify(cache));
+  } catch(e) {}
+}
+function getFromCache(key) {
+  try {
+    const cache = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+    return cache[key]?.data || null;
+  } catch(e) { return null; }
+}
+
+// Override load() — always fetch fresh, fall back to cache if offline
+const _origLoad = load;
+load = async function(path) {
+  const fresh = await _origLoad(path);
+  if (fresh) {
+    saveToCache(path, fresh);
+    return fresh;
+  }
+  // Offline fallback — show cached data
+  return getFromCache(path);
+};
+
 refresh();
 loadAlerts();
 loadRiskProfile();
 loadPushInfo();
-// Auto-refresh display every 60s, auto-trigger data fetch every 15 min
+// Auto-refresh display every 60s
 setInterval(refresh, 60000);
-setInterval(triggerAll, 15 * 60000);
+// Don't auto-trigger external refreshes — the cron handles that
+// Only trigger manually via the Frissítés button
 // Update refresh timer every 30s
 setInterval(updateRefreshTimer, 30000);
 // Refresh alerts every 60s

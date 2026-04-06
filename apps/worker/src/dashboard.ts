@@ -25,7 +25,7 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--
 .logo .tag{font-size:.6rem;background:var(--blue-50);color:var(--blue);padding:2px 8px;border-radius:99px;font-weight:600}
 .header-right{font-size:.8rem;color:var(--gray);display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
 .last-refresh{font-size:.7rem;color:var(--gray);opacity:.8}
-.btn{padding:6px 14px;border-radius:8px;border:none;font-size:.75rem;font-weight:600;cursor:pointer;transition:all .15s}
+.btn{padding:6px 14px;border-radius:8px;border:none;font-size:.75rem;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;flex-shrink:0}
 .btn-blue{background:var(--blue);color:white}.btn-blue:hover{background:var(--blue-dark)}
 .risk-select{padding:5px 10px;border-radius:8px;border:1px solid var(--card-border);font-size:.75rem;font-weight:600;background:var(--card-bg);color:var(--dark);cursor:pointer;outline:none;transition:border-color .15s}
 .risk-select:hover,.risk-select:focus{border-color:var(--blue)}

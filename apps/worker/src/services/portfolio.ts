@@ -156,7 +156,15 @@ export async function getAccountState(env: Env): Promise<AccountState> {
   let totalPositionValue = 0;
 
   for (const pos of positions) {
-    const cached = await getCachedPrice(pos.ticker, env);
+    let cached = await getCachedPrice(pos.ticker, env);
+    // If cache expired, fetch fresh price from Finnhub
+    if (!cached) {
+      const quote = await fetchQuote(pos.ticker, env);
+      if (quote) {
+        try { await updatePriceCache(pos.ticker, quote, env); } catch { /* KV limit */ }
+        cached = { price: quote.c, change: quote.d, changePercent: quote.dp, updatedAt: new Date().toISOString() };
+      }
+    }
     const currentPrice = cached?.price || pos.avgPrice;
     const pnl = (currentPrice - pos.avgPrice) * pos.shares;
     const pnlPercent = ((currentPrice - pos.avgPrice) / pos.avgPrice) * 100;

@@ -143,6 +143,39 @@ export const pushSubscriptions = sqliteTable("push_subscriptions", {
   createdAt: text("created_at").notNull(),
 });
 
+// US congressional stock trades from Finnhub congressional-trading endpoint
+export const politicianTrades = sqliteTable("politician_trades", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  symbol: text("symbol").notNull(),
+  name: text("name").notNull(),         // politician name
+  position: text("position"),           // Senator / Representative
+  ownerType: text("owner_type"),        // self / spouse / child
+  transactionType: text("transaction_type").notNull(), // Purchase / Sale
+  amountFrom: real("amount_from"),
+  amountTo: real("amount_to"),
+  transactionDate: text("transaction_date").notNull(),
+  filingDate: text("filing_date").notNull(),
+  fetchedAt: text("fetched_at").notNull(),
+});
+
+// Copy trades queued to execute via Alpaca after delay
+export const copyTradeQueue = sqliteTable("copy_trade_queue", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  symbol: text("symbol").notNull(),
+  side: text("side", { enum: ["buy", "sell"] }).notNull(),
+  qty: real("qty").notNull(),
+  politicianName: text("politician_name").notNull(),
+  politicianTradeId: integer("politician_trade_id"),
+  executeAfter: text("execute_after").notNull(), // ISO timestamp — execute when this passes
+  status: text("status", { enum: ["pending", "executed", "cancelled", "failed"] })
+    .default("pending")
+    .notNull(),
+  alpacaOrderId: text("alpaca_order_id"),
+  reason: text("reason"),
+  createdAt: text("created_at").notNull(),
+  executedAt: text("executed_at"),
+});
+
 export const investmentPlans = sqliteTable("investment_plans", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   ticker: text("ticker").notNull(),

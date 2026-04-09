@@ -3,6 +3,8 @@ export type Env = {
   CACHE: KVNamespace;
   GEMINI_API_KEY: string;
   FINNHUB_API_KEY: string;
+  ALPACA_API_KEY_ID?: string;
+  ALPACA_API_SECRET_KEY?: string;
   ENVIRONMENT: string;
   API_SECRET?: string;
   APP_PASSWORD?: string;

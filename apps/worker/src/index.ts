@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { and, desc, eq, gte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { trades, news, prices, analysis, dailySnapshots, earningsCalendar, portfolio, pushSubscriptions } from "./db/schema";
+import { trades, news, prices, analysis, dailySnapshots, earningsCalendar, portfolio, pushSubscriptions, copyTradeQueue } from "./db/schema";
 import { getAccountState } from "./services/portfolio";
 import { getCachedPrice, fetchQuote } from "./services/price-api";
 import { computePortfolioMetrics, getSectorExposure } from "./services/risk-manager";
@@ -15,6 +15,9 @@ import { handleWeeklyReport } from "./crons/weekly-report";
 import { getRiskProfile, getRiskLevel, getRiskProfiles, isValidRiskLevel } from "./services/risk-profile";
 import { getNtfyTopic } from "./services/alerter";
 import { LOGIN_HTML } from "./login";
+import { getAlpacaAccount, isAlpacaConfigured, listPositions as listAlpacaPositions } from "./services/alpaca-client";
+import { getRecentPoliticianTrades, getPendingCopyTrades, fetchAndStorePoliticianTrades } from "./services/politician-trades";
+import { executePendingCopyTrades } from "./services/copy-trade-executor";
 import type { Env } from "./types";
 
 const TICKER_REGEX = /^[A-Z]{1,5}$/;
@@ -688,6 +691,60 @@ app.post("/api/settings/risk-profile", async (c) => {
   return c.json({ ok: true, riskLevel: body.level, riskConfig: config });
 });
 
+// ─── Alpaca ───
+
+app.get("/api/alpaca/status", async (c) => {
+  if (!isAlpacaConfigured(c.env)) {
+    return c.json({ connected: false, reason: "API keys not configured" });
+  }
+  const acct = await getAlpacaAccount(c.env);
+  if (!acct) {
+    return c.json({ connected: false, reason: "Failed to fetch account" });
+  }
+  const positions = await listAlpacaPositions(c.env);
+  return c.json({
+    connected: true,
+    account: {
+      cash: parseFloat(acct.cash),
+      portfolioValue: parseFloat(acct.portfolio_value),
+      buyingPower: parseFloat(acct.buying_power),
+      status: acct.status,
+    },
+    positionsCount: positions.length,
+  });
+});
+
+// ─── Politician trades ───
+
+app.get("/api/politician-trades", async (c) => {
+  const limitParam = c.req.query("limit");
+  const limit = Math.min(parseInt(limitParam ?? "50", 10), 200);
+  const politicianTradesList = await getRecentPoliticianTrades(c.env, limit);
+  return c.json({ trades: politicianTradesList });
+});
+
+app.get("/api/copy-trades", async (c) => {
+  const pending = await getPendingCopyTrades(c.env);
+  const db = drizzle(c.env.DB);
+  const executed = await db
+    .select()
+    .from(copyTradeQueue)
+    .where(eq(copyTradeQueue.status, "executed"))
+    .orderBy(desc(copyTradeQueue.executedAt))
+    .limit(20);
+  return c.json({ pending, executed });
+});
+
+app.post("/api/trigger/politician-trades", async (c) => {
+  const result = await fetchAndStorePoliticianTrades(c.env);
+  return c.json({ ok: true, result });
+});
+
+app.post("/api/trigger/copy-trades", async (c) => {
+  const logs = await executePendingCopyTrades(c.env);
+  return c.json({ ok: true, logs });
+});
+
 // Cron trigger handler
 export default {
   fetch: app.fetch,
@@ -713,6 +770,22 @@ export default {
         console.error("[cron] News scrape failed:", e)
       )
     );
+
+    // ALWAYS: execute pending copy trades (fires whenever delay has elapsed)
+    ctx.waitUntil(
+      executePendingCopyTrades(env)
+        .then((logs) => logs.forEach((l) => console.info(l)))
+        .catch((e) => console.error("[cron] Copy trade executor failed:", e))
+    );
+
+    // HOURLY: fetch politician trades (every 60 min, on the :00 minute)
+    if (minute < 15) {
+      ctx.waitUntil(
+        fetchAndStorePoliticianTrades(env)
+          .then((r) => console.info("[cron] Politician trades:", r))
+          .catch((e) => console.error("[cron] Politician trades failed:", e))
+      );
+    }
 
     // DAILY: AI analysis at 20:00 UTC = 22:00 Budapest (este 10)
     // Analyzes today's market + recommends for tomorrow

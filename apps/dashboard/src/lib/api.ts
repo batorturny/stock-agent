@@ -86,6 +86,46 @@ export type PricePoint = {
   recordedAt: string;
 };
 
+export type PoliticianTrade = {
+  id: number;
+  symbol: string;
+  name: string;
+  position: string | null;
+  ownerType: string | null;
+  transactionType: string;
+  amountFrom: number | null;
+  amountTo: number | null;
+  transactionDate: string;
+  filingDate: string;
+  fetchedAt: string;
+};
+
+export type CopyTrade = {
+  id: number;
+  symbol: string;
+  side: string;
+  qty: number;
+  politicianName: string;
+  executeAfter: string;
+  status: string;
+  alpacaOrderId: string | null;
+  reason: string | null;
+  createdAt: string;
+  executedAt: string | null;
+};
+
+export type AlpacaStatus = {
+  connected: boolean;
+  reason?: string;
+  account?: {
+    cash: number;
+    portfolioValue: number;
+    buyingPower: number;
+    status: string;
+  };
+  positionsCount?: number;
+};
+
 export const api = {
   getPortfolio: () => fetchJson<AccountState>("/portfolio"),
   getPicks: () => fetchJson<PicksResponse>("/picks"),
@@ -96,4 +136,10 @@ export const api = {
     fetchJson<{ trades: Trade[]; total: number }>(`/history?limit=${limit}`),
   getReport: (type = "daily") =>
     fetchJson<{ reports: unknown[] }>(`/report?type=${type}`),
+  getPoliticianTrades: (limit = 50) =>
+    fetchJson<{ trades: PoliticianTrade[] }>(`/politician-trades?limit=${limit}`),
+  getCopyTrades: () =>
+    fetchJson<{ pending: CopyTrade[]; executed: CopyTrade[] }>("/copy-trades"),
+  getAlpacaStatus: () =>
+    fetchJson<AlpacaStatus>("/alpaca/status"),
 };

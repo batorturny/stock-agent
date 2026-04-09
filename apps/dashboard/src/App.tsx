@@ -4,6 +4,8 @@ import { PicksPanel } from "~/components/PicksPanel";
 import { NewsFeed } from "~/components/NewsFeed";
 import { TradeHistory } from "~/components/TradeHistory";
 import { PriceChart } from "~/components/PriceChart";
+import { PoliticianFeed } from "~/components/PoliticianFeed";
+import { AlpacaStatus } from "~/components/AlpacaStatus";
 import { usePolling } from "~/hooks/usePolling";
 import { api } from "~/lib/api";
 
@@ -25,6 +27,18 @@ export function App() {
   const tradeData = usePolling(
     useCallback(() => api.getHistory(50), []),
     5 * MINUTE
+  );
+  const politicianData = usePolling(
+    useCallback(() => api.getPoliticianTrades(50), []),
+    15 * MINUTE
+  );
+  const copyTradeData = usePolling(
+    useCallback(() => api.getCopyTrades(), []),
+    5 * MINUTE
+  );
+  const alpacaStatus = usePolling(
+    useCallback(() => api.getAlpacaStatus(), []),
+    MINUTE
   );
 
   return (
@@ -70,6 +84,9 @@ export function App() {
           does not indicate future results.
         </div>
 
+        {/* Alpaca Paper Trading Status */}
+        <AlpacaStatus data={alpacaStatus.data ?? null} />
+
         {/* Portfolio Summary */}
         {portfolio.loading ? (
           <LoadingSkeleton label="Portfolio" />
@@ -102,6 +119,14 @@ export function App() {
             )}
           </div>
         </div>
+
+        {/* Politician Trades + Copy Trading */}
+        {(politicianData.data || copyTradeData.data) && (
+          <PoliticianFeed
+            trades={politicianData.data?.trades ?? []}
+            copyTrades={copyTradeData.data ?? { pending: [], executed: [] }}
+          />
+        )}
 
         {/* News Feed */}
         {newsData.data && <NewsFeed items={newsData.data.items} />}

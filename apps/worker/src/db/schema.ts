@@ -176,6 +176,36 @@ export const copyTradeQueue = sqliteTable("copy_trade_queue", {
   executedAt: text("executed_at"),
 });
 
+// SEC Form 4 insider filings (from Finnhub + EDGAR)
+export const insiderFilings = sqliteTable("insider_filings", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  ticker: text("ticker").notNull(),
+  filerName: text("filer_name").notNull(),
+  filerRole: text("filer_role").notNull(),
+  transactionType: text("transaction_type").notNull(),
+  shares: real("shares").notNull(),
+  pricePerShare: real("price_per_share"),
+  totalValue: real("total_value"),
+  transactionDate: text("transaction_date").notNull(),
+  filingDate: text("filing_date").notNull(),
+  filingUrl: text("filing_url"),
+  source: text("source").notNull().default("finnhub"),
+  fetchedAt: text("fetched_at").notNull(),
+});
+
+// Detected insider trading signals (cluster buys, CEO buys, etc.)
+export const insiderSignals = sqliteTable("insider_signals", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  ticker: text("ticker").notNull(),
+  signalType: text("signal_type").notNull(),
+  insiderCount: integer("insider_count").notNull(),
+  totalValue: real("total_value").notNull(),
+  confidence: real("confidence").notNull(),
+  details: text("details").notNull(),
+  actedOn: integer("acted_on").default(0),
+  detectedAt: text("detected_at").notNull(),
+});
+
 export const investmentPlans = sqliteTable("investment_plans", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   ticker: text("ticker").notNull(),

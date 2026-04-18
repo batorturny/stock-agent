@@ -10,8 +10,8 @@ import { PORTFOLIO_RULES } from "../types";
 export async function handleNewsScrape(env: Env): Promise<void> {
   const db = drizzle(env.DB);
 
-  // Fetch all RSS feeds
-  const allItems = await fetchAllFeeds();
+  // Fetch all RSS feeds + NewsAPI
+  const allItems = await fetchAllFeeds(env);
   if (allItems.length === 0) {
     console.log("[news-scrape] No items from feeds");
     return;

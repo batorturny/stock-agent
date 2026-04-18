@@ -3,6 +3,7 @@ export type Env = {
   CACHE: KVNamespace;
   GEMINI_API_KEY: string;
   FINNHUB_API_KEY: string;
+  NEWSAPI_KEY: string;
   ALPACA_API_KEY_ID?: string;
   ALPACA_API_SECRET_KEY?: string;
   ENVIRONMENT: string;
@@ -112,17 +113,17 @@ export type FeedSource = {
   type: "financial" | "tabloid" | "tech";
 };
 
-// Portfolio management rules — AGGRESSIVE ALWAYS-INVESTED strategy
+// Portfolio management rules — FULL SEND: always max out $5k
 export const PORTFOLIO_RULES = {
   INITIAL_CAPITAL: 5000.0,
   MAX_POSITIONS: 10,
-  MAX_SINGLE_POSITION_PCT: 0.2, // 20% max per position
-  MAX_SECTOR_PCT: 0.4, // 40% max per sector
+  MAX_SINGLE_POSITION_PCT: 0.25, // 25% max per position
+  MAX_SECTOR_PCT: 0.5, // 50% max per sector
   STOP_LOSS_PCT: -0.05, // -5% stop loss (tight)
   TAKE_PROFIT_PCT: 0.12, // +12% take profit (sell half, trail remainder)
-  MIN_CONFIDENCE: 0.55, // 55% — lower bar, idle cash is worse
-  MIN_CASH_RESERVE_PCT: 0.05, // 5% min cash (aggressive)
-  MAX_CASH_PCT: 0.10, // 10% max cash — auto-invest above this
+  MIN_CONFIDENCE: 0.45, // 45% — very low bar, idle cash is the enemy
+  MIN_CASH_RESERVE_PCT: 0.01, // 1% min cash (~$50 buffer)
+  MAX_CASH_PCT: 0.03, // 3% max cash — auto-invest anything above $150
   NEWS_SELL_IMPACT_THRESHOLD: 6, // impact > 6 triggers reactive sell
   NEWS_SELL_SENTIMENT_THRESHOLD: -0.3, // sentiment < -0.3 triggers reactive sell
   MIN_HOLD_HOURS: 72, // 3-day minimum hold period (stop-loss always overrides)

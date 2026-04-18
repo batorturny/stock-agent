@@ -67,6 +67,117 @@ export const FEED_SOURCES: FeedSource[] = [
   },
 ];
 
+// ─── NewsAPI.org — targeted company news for stocks we track ───
+
+const NEWSAPI_BASE = "https://newsapi.org/v2/everything";
+
+// Companies/keywords to search on NewsAPI — maps to tickers the AI can reference
+const NEWSAPI_QUERIES: { query: string; tickers: string[] }[] = [
+  { query: "Tesla OR Elon Musk", tickers: ["TSLA"] },
+  { query: "Apple iPhone OR Apple Mac OR Tim Cook", tickers: ["AAPL"] },
+  { query: "Nvidia AI chips OR Jensen Huang", tickers: ["NVDA"] },
+  { query: "Microsoft Azure OR Satya Nadella", tickers: ["MSFT"] },
+  { query: "Amazon AWS OR Andy Jassy", tickers: ["AMZN"] },
+  { query: "Meta Zuckerberg OR Facebook Instagram", tickers: ["META"] },
+  { query: "Google Alphabet OR Sundar Pichai", tickers: ["GOOGL"] },
+  { query: "JPMorgan OR Jamie Dimon", tickers: ["JPM"] },
+  { query: "Goldman Sachs OR Wall Street banks", tickers: ["GS"] },
+  { query: "Federal Reserve OR interest rate OR inflation", tickers: [] }, // macro
+  { query: "stock market crash OR market rally OR S&P 500", tickers: [] }, // macro
+  { query: "SEC insider trading OR corporate scandal", tickers: [] }, // regulatory
+  { query: "Netflix streaming OR Disney Plus", tickers: ["NFLX", "DIS"] },
+  { query: "AMD chips OR Intel semiconductor", tickers: ["AMD", "INTC"] },
+  { query: "Eli Lilly Ozempic OR weight loss drug", tickers: ["LLY"] },
+];
+
+interface NewsAPIArticle {
+  source: { name: string };
+  title: string;
+  description: string | null;
+  url: string;
+  publishedAt: string;
+}
+
+interface NewsAPIResponse {
+  status: string;
+  totalResults: number;
+  articles: NewsAPIArticle[];
+}
+
+/**
+ * Fetch targeted news for tracked companies via NewsAPI.org
+ * Free tier: 100 requests/day, so we rotate queries across runs
+ */
+export async function fetchNewsAPI(
+  env: Env,
+): Promise<{ source: string; title: string; url: string; summary: string; publishedAt: string }[]> {
+  const apiKey = env.NEWSAPI_KEY;
+  if (!apiKey) return [];
+
+  const results: { source: string; title: string; url: string; summary: string; publishedAt: string }[] = [];
+
+  // Rotate: pick 3 queries per run (100 req/day limit ÷ 15min intervals = ~4 queries max)
+  const runIndex = await getNewsAPIRotationIndex(env);
+  const startIdx = (runIndex * 3) % NEWSAPI_QUERIES.length;
+  const queries = [
+    NEWSAPI_QUERIES[startIdx % NEWSAPI_QUERIES.length],
+    NEWSAPI_QUERIES[(startIdx + 1) % NEWSAPI_QUERIES.length],
+    NEWSAPI_QUERIES[(startIdx + 2) % NEWSAPI_QUERIES.length],
+  ];
+
+  // From date: 7 days ago (NewsAPI free tier limit)
+  const fromDate = new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0];
+
+  for (const q of queries) {
+    try {
+      const url = `${NEWSAPI_BASE}?q=${encodeURIComponent(q.query)}&from=${fromDate}&sortBy=publishedAt&pageSize=5&language=en&apiKey=${apiKey}`;
+      const res = await fetch(url, {
+        headers: { "User-Agent": "StockAgent/1.0" },
+      });
+
+      if (!res.ok) {
+        console.error(`[newsapi] Failed for "${q.query}": ${res.status}`);
+        continue;
+      }
+
+      const data = (await res.json()) as NewsAPIResponse;
+      if (data.status !== "ok" || !data.articles) continue;
+
+      for (const article of data.articles.slice(0, 5)) {
+        if (!article.title || article.title === "[Removed]") continue;
+        results.push({
+          source: `NewsAPI:${article.source?.name ?? "Unknown"}`,
+          title: article.title,
+          url: article.url,
+          summary: stripHtmlForNewsAPI(article.description || ""),
+          publishedAt: article.publishedAt || new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      console.error(`[newsapi] Error for "${q.query}":`, err);
+    }
+  }
+
+  // Increment rotation index
+  await setNewsAPIRotationIndex(runIndex + 1, env);
+
+  console.log(`[newsapi] Fetched ${results.length} articles from ${queries.length} queries`);
+  return results;
+}
+
+function stripHtmlForNewsAPI(html: string): string {
+  return html.replace(/<[^>]*>/g, "").trim().slice(0, 500);
+}
+
+async function getNewsAPIRotationIndex(env: Env): Promise<number> {
+  const val = await env.CACHE.get("newsapi_rotation_idx");
+  return val ? parseInt(val, 10) : 0;
+}
+
+async function setNewsAPIRotationIndex(idx: number, env: Env): Promise<void> {
+  await env.CACHE.put("newsapi_rotation_idx", String(idx), { expirationTtl: 86400 });
+}
+
 type RSSItem = {
   title: string;
   link: string;
@@ -126,7 +237,9 @@ export async function fetchFeed(
   }
 }
 
-export async function fetchAllFeeds(): Promise<
+export async function fetchAllFeeds(
+  env?: Env,
+): Promise<
   { source: string; title: string; url: string; summary: string; publishedAt: string }[]
 > {
   const results = await Promise.allSettled(
@@ -152,6 +265,16 @@ export async function fetchAllFeeds(): Promise<
         summary: stripHtml(item.description || ""),
         publishedAt: item.pubDate || item["dc:date"] || new Date().toISOString(),
       });
+    }
+  }
+
+  // Fetch NewsAPI.org articles for tracked companies
+  if (env) {
+    try {
+      const newsApiItems = await fetchNewsAPI(env);
+      allItems.push(...newsApiItems);
+    } catch (err) {
+      console.error("[news-fetcher] NewsAPI fetch failed:", err);
     }
   }
 

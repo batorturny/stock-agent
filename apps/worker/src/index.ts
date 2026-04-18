@@ -18,6 +18,7 @@ import { LOGIN_HTML } from "./login";
 import { getAlpacaAccount, isAlpacaConfigured, listPositions as listAlpacaPositions } from "./services/alpaca-client";
 import { getRecentPoliticianTrades, getPendingCopyTrades, fetchAndStorePoliticianTrades } from "./services/politician-trades";
 import { executePendingCopyTrades } from "./services/copy-trade-executor";
+import { fetchInsiderFilings, getRecentInsiderBuys, getRecentInsiderSells, getInsiderSignals } from "./services/insider-trading";
 import type { Env } from "./types";
 
 const TICKER_REGEX = /^[A-Z]{1,5}$/;
@@ -745,6 +746,34 @@ app.post("/api/trigger/copy-trades", async (c) => {
   return c.json({ ok: true, logs });
 });
 
+// ─── Insider trading ───
+
+app.get("/api/insider/buys", async (c) => {
+  const days = parseInt(c.req.query("days") ?? "14", 10);
+  const buys = await getRecentInsiderBuys(c.env, Math.min(days, 90));
+  return c.json({ buys, count: buys.length });
+});
+
+app.get("/api/insider/sells", async (c) => {
+  const days = parseInt(c.req.query("days") ?? "14", 10);
+  const sells = await getRecentInsiderSells(c.env, Math.min(days, 90));
+  return c.json({ sells, count: sells.length });
+});
+
+app.get("/api/insider/signals", async (c) => {
+  const signals = await getInsiderSignals(c.env);
+  return c.json({ signals, count: signals.length });
+});
+
+app.post("/api/trigger/insider-filings", async (c) => {
+  try {
+    const result = await fetchInsiderFilings(c.env);
+    return c.json({ ok: true, result });
+  } catch (e) {
+    return c.json({ ok: false, error: String(e) }, 500);
+  }
+});
+
 // Cron trigger handler
 export default {
   fetch: app.fetch,
@@ -753,43 +782,51 @@ export default {
     env: Env,
     ctx: ExecutionContext
   ): Promise<void> {
-    // Single cron runs every 15 min — handles ALL jobs internally
+    // Cron runs every minute — price + trade execution always, rest on schedule
     const now = new Date();
     const hour = now.getUTCHours();
     const minute = now.getUTCMinutes();
     const day = now.getUTCDay(); // 0=Sun, 1=Mon
 
-    // ALWAYS: price fetch + news scrape (every 15 min)
+    // EVERY MINUTE: price fetch + stop-loss/take-profit + pending orders + rotation
     ctx.waitUntil(
       handlePriceFetch(env).catch((e) =>
         console.error("[cron] Price fetch failed:", e)
       )
     );
-    ctx.waitUntil(
-      handleNewsScrape(env).catch((e) =>
-        console.error("[cron] News scrape failed:", e)
-      )
-    );
 
-    // ALWAYS: execute pending copy trades (fires whenever delay has elapsed)
+    // EVERY MINUTE: execute pending copy trades (fires whenever delay has elapsed)
     ctx.waitUntil(
       executePendingCopyTrades(env)
         .then((logs) => logs.forEach((l) => console.info(l)))
         .catch((e) => console.error("[cron] Copy trade executor failed:", e))
     );
 
-    // HOURLY: fetch politician trades (every 60 min, on the :00 minute)
-    if (minute < 15) {
+    // EVERY 15 MIN: news scrape + sentiment
+    if (minute % 15 === 0) {
+      ctx.waitUntil(
+        handleNewsScrape(env).catch((e) =>
+          console.error("[cron] News scrape failed:", e)
+        )
+      );
+    }
+
+    // HOURLY: fetch politician trades + insider filings (on the :00 minute)
+    if (minute === 0) {
       ctx.waitUntil(
         fetchAndStorePoliticianTrades(env)
           .then((r) => console.info("[cron] Politician trades:", r))
           .catch((e) => console.error("[cron] Politician trades failed:", e))
       );
+      ctx.waitUntil(
+        fetchInsiderFilings(env)
+          .then((r) => console.info("[cron] Insider filings:", r))
+          .catch((e) => console.error("[cron] Insider filings failed:", e))
+      );
     }
 
     // DAILY: AI analysis at 20:00 UTC = 22:00 Budapest (este 10)
-    // Analyzes today's market + recommends for tomorrow
-    if (hour === 20 && minute < 15) {
+    if (hour === 20 && minute === 0) {
       ctx.waitUntil(
         handleDailyAnalysis(env).catch((e) =>
           console.error("[cron] Daily analysis failed:", e)
@@ -798,7 +835,7 @@ export default {
     }
 
     // WEEKLY: report on Monday at 07:00 UTC
-    if (day === 1 && hour === 7 && minute < 15) {
+    if (day === 1 && hour === 7 && minute === 0) {
       ctx.waitUntil(
         handleWeeklyReport(env).catch((e) =>
           console.error("[cron] Weekly report failed:", e)

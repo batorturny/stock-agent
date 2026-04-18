@@ -1,12 +1,11 @@
 import { desc, gte, not, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { news, prices, analysis, predictions, trades, investmentPlans } from "../db/schema";
-import { runDailyAnalysis, doubleCheckAnalysis, generateInvestmentPlan } from "../services/ai-analyst";
+import { runDailyAnalysis, generateInvestmentPlan } from "../services/ai-analyst";
 import { getAccountState, executeTrade, rebalancePortfolio, autoInvestExcessCash } from "../services/portfolio";
 import { getCachedPrice } from "../services/price-api";
 import {
   checkDrawdownHalt,
-  fetchAndSaveEarningsCalendar,
   getUpcomingEarnings,
   getHistoricalPrices,
   computeRSI,
@@ -16,6 +15,7 @@ import {
 import { sendAlert, HU_ALERTS } from "../services/alerter";
 import { buildCompanyContext, getCachedSectorPerformance, getCachedWatchlist } from "../services/stock-screener";
 import { getRiskProfile } from "../services/risk-profile";
+import { getInsiderSummaryForAI, getInsiderSignals } from "../services/insider-trading";
 import type { Env, BuyPick } from "../types";
 import { PORTFOLIO_RULES } from "../types";
 
@@ -135,11 +135,10 @@ LEARN FROM YOUR MISTAKES: If accuracy is below 50%, be MORE conservative. If a s
   // (reduced from full watchlist to avoid hitting Workers subrequest limit)
   const portfolioTickers = accountState.positions.map((p) => p.ticker);
 
-  let watchlistTickers: string[];
   try {
-    watchlistTickers = await getCachedWatchlist(env);
+    await getCachedWatchlist(env);
   } catch {
-    watchlistTickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "JPM", "AMD", "NFLX"];
+    // Watchlist unavailable — continue with portfolio tickers only
   }
 
   // Only compute TA for portfolio tickers (not watchlist — saves subrequests)
@@ -224,6 +223,16 @@ LEARN FROM YOUR MISTAKES: If accuracy is below 50%, be MORE conservative. If a s
     console.log(`[daily-analysis] Company context built for ${contextTickers.length} tickers`);
   } catch (err) {
     console.error("[daily-analysis] Company context build failed:", err);
+  }
+
+  // 4f2. Insider trading data — SEC Form 4 signals
+  let insiderData = "";
+  try {
+    insiderData = await getInsiderSummaryForAI(env);
+    const signals = await getInsiderSignals(env);
+    console.log(`[daily-analysis] Insider data loaded: ${signals.length} active signals`);
+  } catch (err) {
+    console.error("[daily-analysis] Insider data fetch failed:", err);
   }
 
   // 4g. Load active investment plans for AI context
@@ -314,7 +323,8 @@ LEARN FROM YOUR MISTAKES: If accuracy is below 50%, be MORE conservative. If a s
     companyContext,
     env,
     aiHistory,
-    investmentPlansContext
+    investmentPlansContext,
+    insiderData
   );
 
   console.log(

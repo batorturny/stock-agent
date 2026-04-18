@@ -105,10 +105,18 @@ Before making any recommendation, reason through:
 If a sector ETF is outperforming (>+1% today), PRIORITIZE stocks from that sector for new buys.
 If a sector ETF is underperforming (<-1% today), AVOID new buys in that sector and consider trimming existing positions.
 
-## INSIDER ACTIVITY RULES
-- If insider selling is HEAVY (multiple insiders selling large amounts), DOWNGRADE confidence by 20%.
-- If insider buying is present (especially CEO/CFO), UPGRADE confidence by 10%.
+## INSIDER TRADING RULES (SEC Form 4 — MOST IMPORTANT SIGNAL)
+Insider trading data is the HIGHEST CONVICTION signal available. Corporate insiders (CEO, CFO, directors)
+buying their own stock with their own money is the #1 predictor of future outperformance.
+
+- **CLUSTER BUY (3+ insiders buying in 7 days)**: STRONG BUY signal — upgrade confidence by +25%. This is your TOP priority.
+- **CEO/CFO BUY**: Upgrade confidence by +15%. CEO buying $100K+ of their own stock = they know something positive is coming.
+- **LARGE BUY ($500K+)**: Major conviction signal — upgrade confidence by +10%.
+- **CLUSTER SELL (3+ insiders selling)**: RED FLAG — downgrade confidence by -30% or SELL if held.
+- **Heavy insider selling (multiple insiders, large amounts)**: DOWNGRADE confidence by 20%.
+- If insider buying is present AND news sentiment is positive = HIGHEST CONVICTION BUY.
 - React to CEO/founder news — if negative about a leader (resignation, scandal, investigation), SELL associated stock IMMEDIATELY.
+- When choosing between two similar buy candidates, ALWAYS prefer the one with recent insider buying.
 
 ## CURRENT STATE
 
@@ -129,6 +137,9 @@ DO NOT sell just because you found something "better" — patience is profitable
 
 ### Company Profiles & Insider Activity
 {company_context}
+
+### SEC Form 4 Insider Trading Data
+{insider_data}
 
 ### News — Last 24 Hours (with sentiment scores)
 {recent_news}
@@ -262,13 +273,15 @@ export async function runDailyAnalysis(
   companyContext: string,
   env: Env,
   aiHistory: string = "",
-  investmentPlans: string = ""
+  investmentPlans: string = "",
+  insiderData: string = ""
 ): Promise<DailyAnalysis> {
   const prompt = DAILY_ANALYSIS_PROMPT
     .replace("{portfolio_state}", portfolioState)
     .replace("{investment_plans}", investmentPlans || "No active investment plans.")
     .replace("{sector_performance}", sectorPerformance || "No sector data available")
     .replace("{company_context}", companyContext || "No company profile data available")
+    .replace("{insider_data}", insiderData || "No insider trading data available")
     .replace("{recent_news}", recentNews)
     .replace("{news_trends}", newsTrends)
     .replace("{price_history}", priceHistory)

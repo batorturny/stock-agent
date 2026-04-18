@@ -2,22 +2,24 @@ name = "stock-agent"
 main = "src/index.ts"
 compatibility_date = "2025-03-01"
 compatibility_flags = ["nodejs_compat"]
-account_id = "466788bf94b994a7922cbd15b834fe9b"
+account_id = "a6d7c10a30cade7a227a881b4c44a558"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "stock-agent-db"
-database_id = "ec67bd1d-5a79-49ed-990b-315a59215669"
+database_id = "700f0453-a1f5-4df4-aa49-a2fdb4582da6"
 
 [[kv_namespaces]]
 binding = "CACHE"
-id = "425ce93f0ab84e708013a64198298069"
+id = "e5b0ddff1c674075811d6d4a9891ffa4"
 
-# Single cron trigger — runs every 15 min, handles all jobs internally
+# Every minute: price check + stop-loss + trade execution
+# News/cache refresh handled internally (every 15th run)
 [triggers]
 crons = [
-  "*/15 * * * *",
+  "* * * * *",
 ]
 
 [vars]
 ENVIRONMENT = "development"
+NEWSAPI_KEY = "2b54c933cd5c4520a29f9ee70804941c"
